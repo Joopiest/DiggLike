@@ -286,6 +286,12 @@ def get_raw_data(sources_selected):
         all_items.extend(fetch_rss("https://phys.org/rss-feed/", "Phys.org", "เทคโนโลยี (Tech)"))
     if "Space.com (Space News)" in sources_selected:
         all_items.extend(fetch_rss("https://www.space.com/feeds/all", "Space.com", "เทคโนโลยี (Tech)"))
+    if "MIT Tech Review (Tech News)" in sources_selected:
+        all_items.extend(fetch_rss("https://www.technologyreview.com/feed/", "MIT Tech Review", "เทคโนโลยี (Tech)"))
+    if "Wired Magazine (Tech News)" in sources_selected:
+        all_items.extend(fetch_rss("https://www.wired.com/feed/rss", "Wired", "เทคโนโลยี (Tech)"))
+    if "Physics World (Science News)" in sources_selected:
+        all_items.extend(fetch_rss("https://physicsworld.com/feed/", "Physics World", "เทคโนโลยี (Tech)"))
     return all_items
 
 def fetch_all_data(sources_selected):
@@ -355,20 +361,23 @@ st.markdown("Your curated trending feed. **Digg** what you like, **Bury** what y
 st.sidebar.header("⚙️ Your Preferences")
 search_query = st.sidebar.text_input("🔍 ค้นหาข่าว", "")
 sources_data = [
-    ("Reddit (Global Trends)", "🟧 **Reddit**"),
-    ("Pantip (Thai Trends)", "🟪 **Pantip**"),
+    ("Al Jazeera (Global News)", "🟡 **Al Jazeera**"),
+    ("BBC (Global News)", "🟥 **BBC News**"),
+    ("Blognone (IT News)", "🌐 **Blognone**"),
+    ("CNN (Global News)", "🔴 **CNN**"),
     ("Google News (Thailand)", "🟦 **Google News TH**"),
     ("Google News TH (IT)", "🟨 **Google News TH (IT)**"),
-    ("BBC (Global News)", "🟥 **BBC News**"),
-    ("CNN (Global News)", "🔴 **CNN**"),
-    ("Al Jazeera (Global News)", "🟡 **Al Jazeera**"),
-    ("Thairath (Thai News)", "🟢 **Thairath**"),
-    ("Blognone (IT News)", "🌐 **Blognone**"),
-    ("The Standard (Thai News)", "⚫ **The Standard**"),
     ("Krungthep Turakij (Business News)", "🔵 **Krungthep Turakij**"),
-    ("Spaceth.co (Space News)", "🚀 **Spaceth.co**"),
+    ("MIT Tech Review (Tech News)", "🦾 **MIT Tech Review**"),
+    ("Pantip (Thai Trends)", "🟪 **Pantip**"),
+    ("Physics World (Science News)", "⚛️ **Physics World**"),
     ("Physics.org (Science News)", "🔬 **Phys.org**"),
-    ("Space.com (Space News)", "🌌 **Space.com**")
+    ("Reddit (Global Trends)", "🟧 **Reddit**"),
+    ("Space.com (Space News)", "🌌 **Space.com**"),
+    ("Spaceth.co (Space News)", "🚀 **Spaceth.co**"),
+    ("The Standard (Thai News)", "⚫ **The Standard**"),
+    ("Thairath (Thai News)", "🟢 **Thairath**"),
+    ("Wired Magazine (Tech News)", "🔌 **Wired**")
 ]
 
 col_sel, col_clr = st.sidebar.columns(2)
@@ -705,7 +714,10 @@ else:
         "Krungthep Turakij (Business News)": "Krungthep Turakij",
         "Spaceth.co (Space News)": "Spaceth.co",
         "Physics.org (Science News)": "Phys.org",
-        "Space.com (Space News)": "Space.com"
+        "Space.com (Space News)": "Space.com",
+        "MIT Tech Review (Tech News)": "MIT Tech Review",
+        "Wired Magazine (Tech News)": "Wired",
+        "Physics World (Science News)": "Physics World"
     }
     
     # Mapping from UI options to internal source names
@@ -772,7 +784,10 @@ else:
                 "Krungthep Turakij": "#003366",
                 "Spaceth.co": "#0A0E17",
                 "Phys.org": "#2B4C7E",
-                "Space.com": "#00518A"
+                "Space.com": "#00518A",
+                "MIT Tech Review": "#A31F34",
+                "Wired": "#000000",
+                "Physics World": "#004B87"
             }
             bg_color = source_colors.get(item['source'], "#444")
             
