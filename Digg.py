@@ -301,6 +301,7 @@ st.markdown("Your curated trending feed. **Digg** what you like, **Bury** what y
 
 # Sidebar - Preferences
 st.sidebar.header("⚙️ Your Preferences")
+search_query = st.sidebar.text_input("🔍 ค้นหาข่าว", "")
 sources_data = [
     ("Reddit (Global Trends)", "🟧 **Reddit**"),
     ("Pantip (Thai Trends)", "🟪 **Pantip**"),
@@ -661,6 +662,8 @@ else:
     
     # Filter items by selected sources
     filtered_items = [item for item in st.session_state.fetched_items if item['source'] in allowed_names]
+    if search_query:
+        filtered_items = [item for item in filtered_items if search_query.lower() in item['title'].lower()]
     
     # Save to file for API server (handles thread reload issues)
     import json
