@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+running_state.txt
+last_fetch.txt
+current_feed.json
