@@ -825,7 +825,7 @@ else:
                         this.color = COLORS[this.source] || "#95a5a6";
                         
                         let score = data.base_score || data.score || 100;
-                        this.height = Math.max(25, Math.min(150, Math.floor(score / 100)));
+                        this.height = Math.max(25, Math.min(150, 25 + Math.floor(score / 10)));
                         this.width = colWidth - 10;
                         
                         // Start off screen (above camera for its specific column)
