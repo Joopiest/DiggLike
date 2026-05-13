@@ -8,6 +8,7 @@ import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import streamlit.components.v1 as components
 import os
+from datetime import datetime, timezone, timedelta
 
 # --- Background Daemon System Globals ---
 LATEST_NEWS = []
@@ -399,6 +400,55 @@ if enable_auto:
 else:
     auto_refresh_interval = 0
 
+# --- Timezone Selector ---
+st.sidebar.subheader("🌐 Timezone")
+TIMEZONE_OPTIONS = {
+    "UTC-12:00 (Baker Island)": -12,
+    "UTC-11:00 (Samoa)": -11,
+    "UTC-10:00 (Hawaii)": -10,
+    "UTC-09:00 (Alaska)": -9,
+    "UTC-08:00 (Pacific US)": -8,
+    "UTC-07:00 (Mountain US)": -7,
+    "UTC-06:00 (Central US)": -6,
+    "UTC-05:00 (Eastern US)": -5,
+    "UTC-04:00 (Atlantic)": -4,
+    "UTC-03:00 (Buenos Aires)": -3,
+    "UTC-02:00 (Mid-Atlantic)": -2,
+    "UTC-01:00 (Azores)": -1,
+    "UTC+00:00 (London/GMT)": 0,
+    "UTC+01:00 (Paris/Berlin)": 1,
+    "UTC+02:00 (Cairo/Helsinki)": 2,
+    "UTC+03:00 (Moscow/Riyadh)": 3,
+    "UTC+03:30 (Tehran)": 3.5,
+    "UTC+04:00 (Dubai)": 4,
+    "UTC+05:00 (Karachi)": 5,
+    "UTC+05:30 (India/IST)": 5.5,
+    "UTC+05:45 (Nepal)": 5.75,
+    "UTC+06:00 (Dhaka)": 6,
+    "UTC+06:30 (Myanmar)": 6.5,
+    "UTC+07:00 (Bangkok/Jakarta)": 7,
+    "UTC+08:00 (Singapore/HK)": 8,
+    "UTC+09:00 (Tokyo/Seoul)": 9,
+    "UTC+09:30 (Adelaide)": 9.5,
+    "UTC+10:00 (Sydney)": 10,
+    "UTC+11:00 (Vladivostok)": 11,
+    "UTC+12:00 (Auckland)": 12,
+    "UTC+13:00 (Samoa)": 13,
+}
+tz_names = list(TIMEZONE_OPTIONS.keys())
+# Default to UTC+07:00 (Bangkok)
+default_tz_idx = tz_names.index("UTC+07:00 (Bangkok/Jakarta)")
+selected_tz_name = st.sidebar.selectbox("เลือก Timezone ของคุณ", tz_names, index=default_tz_idx, key="user_timezone")
+user_utc_offset_hours = TIMEZONE_OPTIONS[selected_tz_name]
+user_tz = timezone(timedelta(hours=user_utc_offset_hours))
+
+def format_ts(ts):
+    """Format a Unix timestamp to HH:MM:SS in the user's selected timezone."""
+    if ts <= 0:
+        return "--:--:--"
+    dt = datetime.fromtimestamp(ts, tz=timezone.utc).astimezone(user_tz)
+    return dt.strftime("%H:%M:%S")
+
 # Update background config safely — only set interval when running
 if st.session_state.get('running_state', False):
     BG_CONFIG["interval_minutes"] = auto_refresh_interval
@@ -425,11 +475,11 @@ if enable_auto and auto_refresh_interval > 0 and st.session_state.get('running_s
     last_fetch = st.session_state.get('last_fetch_time', 0)
 
     now = time_mod.time()
-    last_time_str = time_mod.strftime("%H:%M:%S", time_mod.localtime(last_fetch)) if last_fetch > 0 else "--:--:--"
+    last_time_str = format_ts(last_fetch)
 
     if last_fetch > 0:
         next_fetch_ts = last_fetch + auto_refresh_interval * 60
-        next_time_str = time_mod.strftime("%H:%M:%S", time_mod.localtime(next_fetch_ts))
+        next_time_str = format_ts(next_fetch_ts)
         interval_ms = auto_refresh_interval * 60 * 1000
         fetch_ts_ms = int(last_fetch * 1000)
     else:
@@ -706,7 +756,7 @@ else:
         
         import time as time_mod
         last_fetch_ts = st.session_state.get('last_fetch_time', 0)
-        fetch_time_str = time_mod.strftime("%H:%M:%S", time_mod.localtime(last_fetch_ts)) if last_fetch_ts > 0 else "--:--:--"
+        fetch_time_str = format_ts(last_fetch_ts)
         stack_data = [{"id": item['id'], "title": item['title'], "category": item['category'], "score": get_total_score(item), "url": item['url'], "source": item['source'], "fetch_time": fetch_time_str} for item in sorted_items]
         js_data = json.dumps(stack_data)
         
