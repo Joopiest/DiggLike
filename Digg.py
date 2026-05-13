@@ -976,13 +976,36 @@ else:
                     
                     let COLUMNS = CATEGORIES.length;
                     let FLOOR_Y = canvas.height - 40;
+                    let COL_WIDTH = canvas.width / COLUMNS;
+                    
                     columnHeights = new Array(COLUMNS).fill(FLOOR_Y);
                     cameraY = new Array(COLUMNS).fill(0);
                     targetCameraY = new Array(COLUMNS).fill(0);
                     
-                    // Data is injected directly from Python, no fetch needed
+                    // Load from sessionStorage
+                    let storedBlocks = [];
+                    try {
+                        storedBlocks = JSON.parse(sessionStorage.getItem('diggBlocks') || '[]');
+                    } catch(e) {}
                     
-                    queue = [...rawData];
+                    let restoredIds = new Set();
+                    // Keep only blocks that are in the new rawData
+                    let validStored = storedBlocks.filter(b => rawData.some(r => r.id === b.id));
+                    
+                    // Sort by y descending (bottom to top)
+                    validStored.sort((a, b) => b.y - a.y);
+                    
+                    for (let stored of validStored) {
+                        let data = rawData.find(r => r.id === stored.id);
+                        let block = new Block(data, COL_WIDTH, FLOOR_Y);
+                        block.y = stored.y;
+                        block.stopped = false; // Allow falling if needed
+                        blocks.push(block);
+                        restoredIds.add(stored.id);
+                    }
+                    
+                    // Filter queue to remove restored blocks
+                    queue = rawData.filter(r => !restoredIds.has(r.id));
                     
                     initialized = true;
                 }
@@ -1090,6 +1113,14 @@ else:
                     for (let block of blocks) {
                         block.update();
                         block.draw();
+                    }
+                    
+                    // Save to sessionStorage
+                    if (initialized) {
+                        sessionStorage.setItem('diggBlocks', JSON.stringify(blocks.map(b => ({
+                            id: b.data.id,
+                            y: b.y
+                        }))));
                     }
                     
 
