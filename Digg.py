@@ -10,6 +10,47 @@ import streamlit.components.v1 as components
 import os
 from datetime import datetime, timezone, timedelta
 
+# --- Firebase Initialization ---
+import firebase_admin
+from firebase_admin import credentials, firestore
+
+if not firebase_admin._apps:
+    try:
+        # Try local JSON file first (Parent directory)
+        cred_path = os.path.join(os.path.dirname(__file__), '..', 'joopiest-f16cf-firebase-adminsdk-fbsvc-3547a4eba1.json')
+        
+        if os.path.exists(cred_path):
+            cred = credentials.Certificate(cred_path)
+            firebase_admin.initialize_app(cred)
+        else:
+            # Try Streamlit Secrets (Cloud)
+            try:
+                if "firebase" in st.secrets:
+                    cert_dict = dict(st.secrets["firebase"])
+                    cred = credentials.Certificate(cert_dict)
+                    firebase_admin.initialize_app(cred)
+                else:
+                    st.warning("Firebase credentials not found (No JSON or Secrets). Global voting disabled.")
+            except:
+                # Handle cases where st.secrets is accessed but no secrets.toml exists
+                st.warning("Firebase credentials not found (Local Mode). Global voting disabled.")
+    except Exception as e:
+        st.error(f"Error initializing Firebase: {e}")
+
+try:
+    db = firestore.client()
+except:
+    db = None
+
+def update_global_vote(item_id, old_vote, new_vote):
+    diff = (new_vote - old_vote) * 5000
+    if diff != 0 and db:
+        try:
+            doc_ref = db.collection('app_state').document('global_votes')
+            doc_ref.set({item_id: firestore.Increment(diff)}, merge=True)
+        except Exception as e:
+            st.error(f"Error updating global vote: {e}")
+
 # --- Background Daemon System Globals ---
 LATEST_NEWS = []
 SEEN_IDS = set()
@@ -81,6 +122,17 @@ if "user_votes" not in st.session_state:
     st.session_state.user_votes = {} # dict mapping item_id -> vote modifier (+1 or -1)
 if "fetched_items" not in st.session_state:
     st.session_state.fetched_items = []
+
+# Fetch global votes on every run to get latest data
+global_votes = {}
+if db:
+    try:
+        doc_ref = db.collection('app_state').document('global_votes')
+        doc = doc_ref.get()
+        if doc.exists:
+            global_votes = doc.to_dict()
+    except Exception as e:
+        pass
 
 # --- Data Fetching Functions ---
 import re
@@ -634,10 +686,9 @@ if not st.session_state.fetched_items:
 else:
     # Calculate Total Score and Sort
     def get_total_score(item):
-        user_vote = st.session_state.user_votes.get(item['id'], 0)
-        # We multiply user vote by a large weight (e.g. 1000) so that local clicks 
-        # have an immediate and noticeable impact on sorting against large base scores.
-        return item['base_score'] + (user_vote * 5000)
+        item_id = item['id']
+        global_vote_score = global_votes.get(item_id, 0)
+        return item['base_score'] + global_vote_score
 
     # Mapping from UI options to internal source names
     SOURCE_MAPPING = {
@@ -690,7 +741,9 @@ else:
             # Digg Button
             up_color = "#FF4500" if current_vote > 0 else "#666"
             if st.button("▲", key=f"up_{item_id}_{tab_prefix}"):
-                st.session_state.user_votes[item_id] = 1 if current_vote <= 0 else 0
+                new_vote = 1 if current_vote <= 0 else 0
+                update_global_vote(item_id, current_vote, new_vote)
+                st.session_state.user_votes[item_id] = new_vote
                 st.rerun()
                 
             # Score
@@ -699,7 +752,9 @@ else:
             # Bury Button
             down_color = "#4285F4" if current_vote < 0 else "#666"
             if st.button("▼", key=f"down_{item_id}_{tab_prefix}"):
-                st.session_state.user_votes[item_id] = -1 if current_vote >= 0 else 0
+                new_vote = -1 if current_vote >= 0 else 0
+                update_global_vote(item_id, current_vote, new_vote)
+                st.session_state.user_votes[item_id] = new_vote
                 st.rerun()
 
         with col_content:

@@ -2,3 +2,4 @@ streamlit
 requests
 feedparser
 beautifulsoup4
+firebase-admin
