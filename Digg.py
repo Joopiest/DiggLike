@@ -9,6 +9,15 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 import streamlit.components.v1 as components
 import os
 from datetime import datetime, timezone, timedelta
+from wordcloud import WordCloud
+import matplotlib.pyplot as plt
+try:
+    from pythainlp.tokenize import word_tokenize
+    from pythainlp.corpus import thai_stopwords
+except ImportError:
+    # Fallback if libraries are not installed yet
+    word_tokenize = lambda x: x.split()
+    thai_stopwords = lambda: set()
 
 # --- Firebase Initialization ---
 import firebase_admin
@@ -394,6 +403,16 @@ st.markdown("Your curated trending feed. **Digg** what you like, **Bury** what y
 st.sidebar.header("⚙️ Your Preferences")
 
 # Search with Clear Button
+# Handle incoming query params for search (from Word Cloud click)
+# Use the newer st.query_params or fallback to experimental
+try:
+    q_params = st.query_params
+    if "search" in q_params:
+        st.session_state.search_input_val = q_params["search"]
+        # Do not clear immediately to ensure st.text_input picks it up
+except:
+    pass
+
 if 'search_input_val' not in st.session_state:
     st.session_state.search_input_val = ""
 
@@ -972,11 +991,7 @@ else:
             </div>
             """, unsafe_allow_html=True)
 
-
     fixed_categories = ["Breaking", "Technology", "Education", "Politics", "Finance", "Economy", "Entertainment", "General"]
-    tab_options = ["📊 Digg Stack", "All Feed"] + fixed_categories
-    
-    # Use shorter names for tabs to ensure they fit nicely
     tab_options = ["📊 Digg Stack", "All Feed", "Breaking", "Technology", "Education", "Politics", "Finance", "Economy", "Entertainment", "General"]
     
     if 'active_tab' not in st.session_state:
@@ -1010,6 +1025,117 @@ else:
         }
     </style>
     """, unsafe_allow_html=True)
+
+    # --- Native Interactive Word Cloud (Bilingual) ---
+    with st.expander("☁️ Explore Topic Word Cloud (Interactive Mode)"):
+        if not filtered_items:
+            st.write("No data available for Word Cloud.")
+        else:
+            try:
+                from collections import Counter
+                import re
+
+                # 1. Combine and Clean Text
+                all_titles = " ".join([item['title'] for item in filtered_items])
+                
+                # 2. Expanded Stopwords (Thai + English)
+                stop_words = set(thai_stopwords())
+                extra_stops = {
+                    'ที่', 'ซึ่ง', 'อัน', 'กับ', 'แก่', 'แต่', 'ต่อ', 'หรือ', 'และ', 'ของ', 'เป็น', 'ได้', 'ใน', 'จาก', 
+                    'การ', 'ให้', 'ปี', 'วัน', 'เดือน', 'นี้', 'นั้น', 'ไป', 'มา', 'จะ', 'ทำ', 'ได้', 'ว่า', 'มี',
+                    'อยู่', 'แล้ว', 'อีก', 'โดย', 'ตาม', 'เพื่อ', 'เมื่อ', 'ถึง', 'ก็', 'จะ', 'ได้', 'แบบ', 'เรื่อง',
+                    'the', 'and', 'for', 'with', 'this', 'that', 'from', 'was', 'were', 'been', 'being', 'have', 'has',
+                    'will', 'would', 'could', 'should', 'about', 'more', 'their', 'there', 'they', 'what', 'which', 'who',
+                    'to', 'in', 'of', 'are', 'at', 'an', 'a', 'as', 'is', 'am', 'it', 'its', 'on', 'by', 'be', 'into', 'up', 
+                    'out', 'over', 'under', 'again', 'further', 'then', 'once', 'here', 'there', 'when', 'where', 'why', 
+                    'how', 'all', 'any', 'both', 'each', 'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 
+                    'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very', 's', 't', 'can', 'will', 'just', 'don', 
+                    'should', 'now', 'off', 'since', 'until', 'through', 'after', 'before', 'above', 'below', 'between',
+                    'during', 'including', 'towards', 'upon', 'concerning', 'within', 'without'
+                }
+                stop_words.update(extra_stops)
+
+                # 3. Tokenize and Count Frequency
+                tokens = word_tokenize(all_titles)
+                clean_tokens = []
+                for t in tokens:
+                    t_clean = t.strip().lower()
+                    t_clean = re.sub(r"['\u2019]s$", "", t_clean)
+                    if len(t_clean) > 1 and not t_clean.isdigit() and t_clean not in stop_words:
+                        clean_tokens.append(t_clean)
+                
+                word_counts = Counter(clean_tokens).most_common(30) # Top 30 for clear UI
+                
+                if not word_counts:
+                    st.write("Not enough significant words found.")
+                else:
+                    # 4. Animated Native Word Cloud (The best of both worlds)
+                    st.write("✨ Click a floating star to filter news:")
+                    
+                    def select_word_callback(w):
+                        st.session_state.search_input_val = w
+                        if "search" in st.query_params:
+                            st.query_params.clear()
+
+                    # Custom CSS for Space-like Floating Animation on Native Buttons
+                    st.markdown("""
+                    <style>
+                        div[data-testid="stExpander"] div[data-testid="stButton"] button {
+                            background: rgba(255, 255, 255, 0.05) !important;
+                            border: 1px solid rgba(255, 255, 255, 0.1) !important;
+                            border-radius: 50px !important;
+                            color: white !important;
+                            font-weight: bold !important;
+                            transition: all 0.3s ease !important;
+                            animation: spaceFloat 7s ease-in-out infinite !important;
+                        }
+                        
+                        @keyframes spaceFloat {
+                            0% { transform: translate(0, 0); }
+                            33% { transform: translate(5px, -8px); }
+                            66% { transform: translate(-3px, 8px); }
+                            100% { transform: translate(0, 0); }
+                        }
+
+                        div[data-testid="stExpander"] div[data-testid="stButton"] button:hover {
+                            background: rgba(66, 133, 244, 0.2) !important;
+                            border-color: #4285F4 !important;
+                            transform: scale(1.2) !important;
+                            box-shadow: 0 0 15px rgba(66, 133, 244, 0.4) !important;
+                        }
+
+                        div[data-testid="stExpander"] div[data-testid="stButton"]:nth-child(2n) button { animation-duration: 9s !important; animation-delay: -1.5s !important; }
+                        div[data-testid="stExpander"] div[data-testid="stButton"]:nth-child(3n) button { animation-duration: 11s !important; animation-delay: -4.2s !important; }
+                        div[data-testid="stExpander"] div[data-testid="stButton"]:nth-child(4n) button { animation-duration: 13s !important; animation-delay: -2.8s !important; }
+                        div[data-testid="stExpander"] div[data-testid="stButton"]:nth-child(5n) button { animation-duration: 7.5s !important; animation-delay: -6.1s !important; }
+                        div[data-testid="stExpander"] div[data-testid="stButton"]:nth-child(7n) button { animation-duration: 15s !important; animation-delay: -3.3s !important; }
+                        div[data-testid="stExpander"] div[data-testid="stButton"]:nth-child(11n) button { animation-duration: 10s !important; animation-delay: -0.5s !important; }
+                    </style>
+                    """, unsafe_allow_html=True)
+                    
+                    max_count = word_counts[0][1]
+                    min_count = word_counts[-1][1]
+                    
+                    # Display words as floating buttons
+                    rows = [word_counts[i:i + 5] for i in range(0, len(word_counts), 5)]
+                    for row_idx, row in enumerate(rows):
+                        cols = st.columns(5)
+                        for i, (word, count) in enumerate(row):
+                            is_top = count > (max_count + min_count) / 1.5
+                            # Add count in parentheses
+                            label = f"⭐ {word.upper()} ({count})" if is_top else f"{word} ({count})"
+                            
+                            # Use on_click callback to avoid state modification error
+                            cols[i].button(
+                                label, 
+                                key=f"wc_float_{word}_{row_idx}_{i}", 
+                                use_container_width=True,
+                                on_click=select_word_callback,
+                                args=(word,)
+                            )
+
+            except Exception as e:
+                st.error(f"Could not generate Animated Word Cloud: {e}")
 
     tab_cols = st.columns(len(tab_options))
     for idx, opt in enumerate(tab_options):
