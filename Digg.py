@@ -140,48 +140,54 @@ import re
 def assign_topic_category(text_to_search, fallback_category):
     text_lower = text_to_search.lower()
     
-    # Use word boundaries for English keywords to prevent 'ai' matching 'thailand'
+    # Category definition with both English (regex-ready) and Thai keywords
+    # Order matters: more specific categories should come before general ones
     keywords = {
-        "ข่าวด่วน (Breaking)": [
-            'ด่วน', 'ระทึก', 'สลด', 'เสียชีวิต', 'จับกุม', 'ระเบิด', 'ไฟไหม้', 'สึนามิ', 'แผ่นดินไหว', 'อุบัติเหตุ', 'กราดยิง', 'สงคราม', 'วิกฤต',
-            r'\bbreaking', r'\burgent', r'\bexplosion', r'\bearthquake', r'\btsunami', r'\bkill', r'\bdead', r'\bwar\b', r'\bcrisis', r'\bshoot', r'\battack', r'\bbomb', r'\bcrash'
-        ],
-        "การเมือง (Politics)": [
-            'นายก', 'สภา', 'การเมือง', 'พรรค', 'ประท้วง', 'รัฐบาล', 'เลือกตั้ง', 'กฎหมาย', 'ศาล', 'ม็อบ', 'ทหาร', 'ตำรวจ',
-            r'\bpolitic', r'\bgovernment', r'\belection', r'\bpresident', r'\btrump\b', r'\bbiden\b', r'\bdemocrat', r'\brepublican', r'\bparliament', r'\bminister'
-        ],
-        "เทคโนโลยี (Tech)": [
-            'เทคโนโลยี', 'มือถือ', 'แอป', 'ไอที', 'คอมพิวเตอร์', 'ซอฟต์แวร์', 'สมาร์ทโฟน', 'อินเทอร์เน็ต',
-            r'\bai\b', r'\bapple\b', r'\bgoogle\b', r'\bmicrosoft\b', r'\btech', r'\bsoftware', r'\bhardware', r'\bcyber', r'\bsmartphone', r'\brobot', r'\bsamsung\b', r'\bnvidia\b', r'\bopenai\b', r'\bchatgpt\b', r'\biphone\b', r'\bandroid\b'
-        ],
-        "เศรษฐกิจ (Economy)": [
-            'เศรษฐกิจ', 'ส่งออก', 'นำเข้า', 'จีดีพี', 'เงินเฟ้อ', 'นโยบายการเงิน', 'พาณิชย์', 'อุตสาหกรรม',
-            r'\beconomy', r'\beconomic', r'\binflation', r'\btrade\b', r'\bgdp\b', r'\bexport', r'\bimport', r'\brecession', r'\bmacroeconomics'
-        ],
-        "การเงิน (Finance)": [
-            'หุ้น', 'ดอกเบี้ย', 'คริปโต', 'ธนาคาร', 'ลงทุน', 'กองทุน', 'ทองคำ', 'ตลาดหลักทรัพย์', 'กำไร', 'รายได้',
-            r'\bfinance', r'\bbank', r'\bstock', r'\bcrypto', r'\binvestment', r'\bbitcoin\b', r'\bwall street', r'\bmarket', r'\bfund\b', r'\bbtc\b', r'\beth\b'
-        ],
-        "การศึกษา (Education)": [
-            'การศึกษา', 'โรงเรียน', 'มหาวิทยาลัย', 'นักเรียน', 'นิสิต', 'นักศึกษา', 'สอบ', 'ทุน', 'ครู', 'อาจารย์',
-            r'\beducation', r'\bschool', r'\buniversity', r'\bstudent', r'\bteacher', r'\bcollege', r'\bexam', r'\bscholarship'
-        ],
-        "บันเทิง (Entertainment)": [
-            'บันเทิง', 'ดารา', 'ภาพยนตร์', 'เพลง', 'คอนเสิร์ต', 'หนัง', 'ละคร', 'ซีรีส์', 'ศิลปิน', 'ไอดอล', 'ดราม่า', 'รีวิวหนัง',
-            r'\bentertainment', r'\bmovie', r'\bmusic', r'\bcelebrity', r'\bhollywood\b', r'\bnetflix\b', r'\bactor', r'\bactress', r'\bsinger', r'\bpop\b', r'\banime\b', r'\bkpop\b'
-        ]
+        "Breaking": {
+            "en": [r'breaking', r'urgent', r'alert', r'crisis', r'latest'],
+            "th": ['ด่วน', 'ข่าวด่วน', 'อัปเดต', 'ประกาศสำคัญ']
+        },
+        "Technology": {
+            "en": [r'tech', r'technology', r'smartphone', r'software', r'hardware', r'ai', r'cyber', r'robot', r'apple', r'google', r'microsoft', r'tesla', r'nvidia'],
+            "th": ['มือถือ', 'ไอที', 'คอมพิวเตอร์', 'หุ่นยนต์', 'สมาร์ทโฟน', 'แอพ', 'แอป', 'เทคโนโลยี', 'อวกาศ']
+        },
+        "Economy": {
+            "en": [r'economy', r'economic', r'gdp', r'inflation', r'trade', r'export', r'import', r'recession'],
+            "th": ['เศรษฐกิจ', 'ส่งออก', 'เงินเฟ้อ', 'จีดีพี', 'ภาษี', 'พาณิชย์']
+        },
+        "Finance": {
+            "en": [r'finance', r'bank', r'stock', r'crypto', r'investment', r'market', r'bitcoin', r'btc', r'eth', r'nasdaq', r'gold'],
+            "th": ['หุ้น', 'การเงิน', 'ธนาคาร', 'คริปโต', 'บิทคอยน์', 'ทองคำ', 'ดอกเบี้ย', 'เงินฝาก', 'เซต', 'set']
+        },
+        "Education": {
+            "en": [r'education', r'university', r'school', r'student', r'teacher', r'college', r'exam', r'scholarship', r'learning'],
+            "th": ['การศึกษา', 'นักเรียน', 'นักศึกษา', 'มหาวิทยาลัย', 'โรงเรียน', 'สอบ', 'ทุนการศึกษา', 'เรียนต่อ']
+        },
+        "Entertainment": {
+            "en": [r'entertainment', r'movie', r'music', r'celebrity', r'hollywood', r'netflix', r'kpop', r'anime', r'gaming', r'esports'],
+            "th": ['บันเทิง', 'ภาพยนตร์', 'หนัง', 'เพลง', 'ดารา', 'ซีรีส์', 'คอนเสิร์ต', 'เกม', 'ศิลปิน']
+        },
+        "Politics": {
+            "en": [r'politics', r'government', r'election', r'president', r'minister', r'parliament', r'senate', r'diplomacy'],
+            "th": ['การเมือง', 'เลือกตั้ง', 'รัฐบาล', 'นายก', 'สภา', 'ประท้วง', 'พรรค', 'กมล']
+        },
+        "General": {
+            "en": [r'news', r'general', r'world', r'local', r'society', r'culture'],
+            "th": ['ทั่วไป', 'สังคม', 'วัฒนธรรม', 'ชาวบ้าน', 'สรุป']
+        }
     }
     
-    for category, words in keywords.items():
-        for word in words:
-            if word.startswith(r'\b'):
-                # Regex search for English words
-                if re.search(word, text_lower):
-                    return category
-            else:
-                # Normal substring search for Thai words
-                if word in text_lower:
-                    return category
+    import re
+    for category, langs in keywords.items():
+        # 1. Check English keywords with word boundaries (\b)
+        for en_word in langs["en"]:
+            if re.search(rf'\b{en_word}\b', text_lower):
+                return category
+        
+        # 2. Check Thai keywords (normal substring match since Thai doesn't use spaces)
+        for th_word in langs["th"]:
+            if th_word in text_lower:
+                return category
             
     return fallback_category
 
@@ -201,7 +207,7 @@ def fetch_reddit():
                 "url": f"https://www.reddit.com{post['permalink']}",
                 "source": "Reddit",
                 "base_score": post['score'],
-                "category": assign_topic_category(search_text, "ทั่วไป (General)")
+                "category": assign_topic_category(search_text, "General")
             })
         return items
     except Exception as e:
@@ -247,7 +253,7 @@ def fetch_pantip():
                     "url": href if href.startswith('http') else f"https://pantip.com{href}",
                     "source": "Pantip",
                     "base_score": 250, # High base score for Pantip trends
-                    "category": assign_topic_category(title, "ทั่วไป (General)")
+                    "category": assign_topic_category(title, "General")
                 })
                 added_urls.add(href)
             if len(items) >= 10:
@@ -257,62 +263,69 @@ def fetch_pantip():
         return []
 
 def get_raw_data(sources_selected):
+    from concurrent.futures import ThreadPoolExecutor, as_completed
     all_items = []
-    if "Reddit (Global Trends)" in sources_selected:
-        all_items.extend(fetch_reddit())
-    if "BBC (Global News)" in sources_selected:
-        all_items.extend(fetch_rss("http://feeds.bbci.co.uk/news/rss.xml", "BBC News", "ทั่วไป (General)"))
-    if "Google News (Thailand)" in sources_selected:
-        all_items.extend(fetch_rss("https://news.google.com/rss?hl=th&gl=TH&ceid=TH:th", "Google News TH", "ทั่วไป (General)"))
-    if "Google News TH (IT)" in sources_selected:
-        all_items.extend(fetch_rss("https://news.google.com/rss/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZNRGRqTVhZU0FtVnVHZ0pKVGlnQVAB?hl=th&gl=TH&ceid=TH:th", "Google News TH (IT)", "เทคโนโลยี (Tech)"))
-    if "Pantip (Thai Trends)" in sources_selected:
-        all_items.extend(fetch_pantip())
-    if "CNN (Global News)" in sources_selected:
-        all_items.extend(fetch_rss("http://rss.cnn.com/rss/edition.rss", "CNN", "ทั่วไป (General)"))
-    if "Al Jazeera (Global News)" in sources_selected:
-        all_items.extend(fetch_rss("https://www.aljazeera.com/xml/rss/all.xml", "Al Jazeera", "ทั่วไป (General)"))
-    if "Thairath (Thai News)" in sources_selected:
-        all_items.extend(fetch_rss("https://www.thairath.co.th/rss/news", "Thairath", "ทั่วไป (General)"))
-    if "Blognone (IT News)" in sources_selected:
-        all_items.extend(fetch_rss("https://www.blognone.com/atom.xml", "Blognone", "เทคโนโลยี (Tech)"))
-    if "The Standard (Thai News)" in sources_selected:
-        all_items.extend(fetch_rss("https://thestandard.co/feed/", "The Standard", "ทั่วไป (General)"))
-    if "Krungthep Turakij (Business News)" in sources_selected:
-        all_items.extend(fetch_rss("https://www.bangkokbiznews.com/rss/news", "Krungthep Turakij", "เศรษฐกิจ (Economy)"))
-    if "Spaceth.co (Space News)" in sources_selected:
-        all_items.extend(fetch_rss("https://spaceth.co/feed/", "Spaceth.co", "เทคโนโลยี (Tech)"))
-    if "Physics.org (Science News)" in sources_selected:
-        all_items.extend(fetch_rss("https://phys.org/rss-feed/", "Phys.org", "เทคโนโลยี (Tech)"))
-    if "Space.com (Space News)" in sources_selected:
-        all_items.extend(fetch_rss("https://www.space.com/feeds/all", "Space.com", "เทคโนโลยี (Tech)"))
-    if "MIT Tech Review (Tech News)" in sources_selected:
-        all_items.extend(fetch_rss("https://www.technologyreview.com/feed/", "MIT Tech Review", "เทคโนโลยี (Tech)"))
-    if "Wired Magazine (Tech News)" in sources_selected:
-        all_items.extend(fetch_rss("https://www.wired.com/feed/rss", "Wired", "เทคโนโลยี (Tech)"))
-    if "Physics World (Science News)" in sources_selected:
-        all_items.extend(fetch_rss("https://physicsworld.com/feed/", "Physics World", "เทคโนโลยี (Tech)"))
+    
+    # Mapping of source names to their fetch configurations
+    # (Source Name, Fetch Function, Args)
+    fetch_configs = [
+        ("Reddit (Global Trends)", fetch_reddit, ()),
+        ("BBC (Global News)", fetch_rss, ("http://feeds.bbci.co.uk/news/rss.xml", "BBC News", "General")),
+        ("Google News (Thailand)", fetch_rss, ("https://news.google.com/rss?hl=th&gl=TH&ceid=TH:th", "Google News TH", "General")),
+        ("Google News TH (IT)", fetch_rss, ("https://news.google.com/rss/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZNRGRqTVhZU0FtVnVHZ0pKVGlnQVAB?hl=th&gl=TH&ceid=TH:th", "Google News TH (IT)", "Technology")),
+        ("Pantip (Thai Trends)", fetch_pantip, ()),
+        ("CNN (Global News)", fetch_rss, ("http://rss.cnn.com/rss/edition.rss", "CNN", "General")),
+        ("Al Jazeera (Global News)", fetch_rss, ("https://www.aljazeera.com/xml/rss/all.xml", "Al Jazeera", "General")),
+        ("Thairath (Thai News)", fetch_rss, ("https://www.thairath.co.th/rss/news", "Thairath", "General")),
+        ("Blognone (IT News)", fetch_rss, ("https://www.blognone.com/atom.xml", "Blognone", "Technology")),
+        ("The Standard (Thai News)", fetch_rss, ("https://thestandard.co/feed/", "The Standard", "General")),
+        ("Krungthep Turakij (Business News)", fetch_rss, ("https://www.bangkokbiznews.com/rss/news", "Krungthep Turakij", "Economy")),
+        ("Spaceth.co (Space News)", fetch_rss, ("https://spaceth.co/feed/", "Spaceth.co", "Technology")),
+        ("Physics.org (Science News)", fetch_rss, ("https://phys.org/rss-feed/", "Phys.org", "Technology")),
+        ("Space.com (Space News)", fetch_rss, ("https://www.space.com/feeds/all", "Space.com", "Technology")),
+        ("MIT Tech Review (Tech News)", fetch_rss, ("https://www.technologyreview.com/feed/", "MIT Tech Review", "Technology")),
+        ("Wired Magazine (Tech News)", fetch_rss, ("https://www.wired.com/feed/rss", "Wired", "Technology")),
+        ("Physics World (Science News)", fetch_rss, ("https://physicsworld.com/feed/", "Physics World", "Technology"))
+    ]
+    
+    # Increase max_workers to 20 for true parallel execution of all sources
+    with ThreadPoolExecutor(max_workers=20) as executor:
+        future_to_source = {
+            executor.submit(func, *args): name 
+            for name, func, args in fetch_configs 
+            if name in sources_selected
+        }
+        
+        for future in as_completed(future_to_source):
+            try:
+                # Individual source timeout of 7 seconds
+                all_items.extend(future.result(timeout=7))
+            except Exception as e:
+                # If one source fails or times out, we continue with the others
+                continue
+                
     return all_items
 
 def fetch_all_data(sources_selected):
-    with st.spinner("Fetching trending data..."):
-        all_items = get_raw_data(sources_selected)
-        st.session_state.fetched_items = all_items
-        fetch_time = time.time()
-        st.session_state['last_fetch_time'] = fetch_time
-        BG_CONFIG["last_fetch_time"] = fetch_time
-        # Write to file so background thread and UI stay in sync
-        try:
-            file_path = os.path.join(os.path.dirname(__file__), 'last_fetch.txt')
-            with open(file_path, 'w') as f:
-                f.write(str(fetch_time))
-        except:
-            pass
-        
-        # Mark these as SEEN so the background thread doesn't resend them
-        global SEEN_IDS
-        for item in all_items:
-            SEEN_IDS.add(item['id'])
+    # Provide subtle feedback that fetching is starting
+    st.toast("🔄 Fetching news from all sources...", icon="🗞️")
+    all_items = get_raw_data(sources_selected)
+    st.session_state.fetched_items = all_items
+    fetch_time = time.time()
+    st.session_state['last_fetch_time'] = fetch_time
+    BG_CONFIG["last_fetch_time"] = fetch_time
+    # Write to file so background thread and UI stay in sync
+    try:
+        file_path = os.path.join(os.path.dirname(__file__), 'last_fetch.txt')
+        with open(file_path, 'w') as f:
+            f.write(str(fetch_time))
+    except:
+        pass
+    
+    # Mark these as SEEN so the background thread doesn't resend them
+    global SEEN_IDS
+    for item in all_items:
+        SEEN_IDS.add(item['id'])
 
 # API server removed for Streamlit Cloud compatibility
 
@@ -324,7 +337,8 @@ def bg_fetch_loop():
             now = time.time()
             if now - BG_CONFIG["last_fetch_time"] > interval * 60:
                 try:
-                    new_items = get_raw_data(BG_CONFIG["sources"])
+                    all_sources = [src[0] for src in sources_data]
+                    new_items = get_raw_data(all_sources)
                     for item in new_items:
                         if item['id'] not in SEEN_IDS:
                             SEEN_IDS.add(item['id'])
@@ -355,11 +369,91 @@ if 'bg_fetcher_started' not in st.session_state:
 # --- UI Layout ---
 
 st.title("📈 My Local Digg Aggregator")
+st.markdown("""
+    <style>
+    [data-testid="stTabs"] button {
+        white-space: normal !important;
+        overflow-wrap: break-word !important;
+        height: auto !important;
+        min-height: 40px !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 st.markdown("Your curated trending feed. **Digg** what you like, **Bury** what you don't. The best content rises to the top.")
 
 # Sidebar - Preferences
 st.sidebar.header("⚙️ Your Preferences")
-search_query = st.sidebar.text_input("🔍 ค้นหาข่าว", "")
+
+# Search with Clear Button
+if 'search_input_val' not in st.session_state:
+    st.session_state.search_input_val = ""
+
+def clear_search_query():
+    st.session_state.search_input_val = ""
+
+st.sidebar.markdown("### 🔍 Search")
+col_search, col_clear = st.sidebar.columns([0.7, 0.3])
+with col_search:
+    search_query = st.text_input("Search News", key="search_input_val", placeholder="Type to search...", label_visibility="collapsed")
+with col_clear:
+    # CLEAN ALIGNMENT WITHOUT BRITTLE MARGINS
+    st.markdown("""
+        <style>
+        /* 1. Vertically center the row content */
+        [data-testid="stSidebar"] [data-testid="stHorizontalBlock"]:has(input[placeholder="Type to search..."]) {
+            align-items: center !important;
+            gap: 0 !important;
+        }
+
+        /* 2. Style the button to match the input height and look integrated */
+        [data-testid="stSidebar"] [data-testid="stHorizontalBlock"]:has(input[placeholder="Type to search..."]) [data-testid="stButton"] button {
+            margin-top: -15px !important;
+            margin-left: 15px !important; /* Moved 20px to the right from previous -5px */
+            padding: 0 !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            width: 38px !important;
+            height: 38px !important;
+            background: rgba(255,255,255,0.05) !important;
+            border: 1px solid rgba(255,255,255,0.1) !important;
+            border-radius: 8px !important;
+            transition: all 0.2s ease !important;
+        }
+        
+        [data-testid="stSidebar"] [data-testid="stHorizontalBlock"]:has(input[placeholder="Type to search..."]) [data-testid="stButton"] button p {
+            margin: 0 !important;
+            padding: 0 !important;
+            line-height: 1 !important; 
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            color: #888 !important;
+            font-size: 16px !important;
+        }
+
+        [data-testid="stSidebar"] [data-testid="stHorizontalBlock"]:has(input[placeholder="Type to search..."]) [data-testid="stButton"] button:hover {
+            background: rgba(255,255,255,0.12) !important;
+            border-color: rgba(255,255,255,0.3) !important;
+        }
+
+        /* 3. Ensure the search input field matches the height exactly */
+        div[data-testid="stSidebar"] div[data-testid="stTextInput"] input {
+            height: 38px !important;
+            background-color: rgba(255, 255, 255, 0.03) !important;
+            border: 1px solid rgba(255, 255, 255, 0.1) !important;
+            border-radius: 8px !important;
+            color: white !important;
+        }
+        div[data-testid="stSidebar"] div[data-testid="stTextInput"] input:focus {
+            border-color: #ff4500 !important;
+            background-color: rgba(255, 255, 255, 0.07) !important;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+    st.button("✕", help="Clear Search", on_click=clear_search_query)
+
+
 sources_data = [
     ("Al Jazeera (Global News)", "🟡 **Al Jazeera**"),
     ("BBC (Global News)", "🟥 **BBC News**"),
@@ -380,24 +474,54 @@ sources_data = [
     ("Wired Magazine (Tech News)", "🔌 **Wired**")
 ]
 
+# --- Persist selected sources ---
+def save_selections(selected):
+    try:
+        path = os.path.join(os.path.dirname(__file__), 'selected_sources.txt')
+        with open(path, 'w') as f:
+            f.write(",".join(selected))
+    except: pass
+
+def load_selections():
+    try:
+        path = os.path.join(os.path.dirname(__file__), 'selected_sources.txt')
+        if os.path.exists(path):
+            with open(path, 'r') as f:
+                return f.read().strip().split(",")
+    except: pass
+    return [src[0] for src in sources_data] # Default to ALL
+
+# Initialize checkbox states from file if session is fresh
+if 'cb_initialized' not in st.session_state:
+    saved = load_selections()
+    for internal_name, _ in sources_data:
+        st.session_state[f"cb_{internal_name}"] = internal_name in saved
+    st.session_state.cb_initialized = True
+
 col_sel, col_clr = st.sidebar.columns(2)
 if col_sel.button("Select All", use_container_width=True):
     for internal_name, _ in sources_data:
         st.session_state[f"cb_{internal_name}"] = True
+    save_selections([src[0] for src in sources_data])
     st.rerun()
 if col_clr.button("Clear All", use_container_width=True):
     for internal_name, _ in sources_data:
         st.session_state[f"cb_{internal_name}"] = False
+    save_selections([])
     st.rerun()
     
 selected_sources = []
 for internal_name, display_name in sources_data:
     key = f"cb_{internal_name}"
-    if key not in st.session_state:
-        st.session_state[key] = True # Default to True
-        
-    if st.sidebar.checkbox(display_name, key=key):
+    # Track changes to save immediately
+    val = st.sidebar.checkbox(display_name, key=key)
+    if val:
         selected_sources.append(internal_name)
+
+# Detect change in selection to save to file
+if 'prev_selected' not in st.session_state or set(st.session_state.prev_selected) != set(selected_sources):
+    save_selections(selected_sources)
+    st.session_state.prev_selected = selected_sources
 
 if 'running_state' not in st.session_state:
     # Restore from file in case of page reload
@@ -407,10 +531,23 @@ if 'running_state' not in st.session_state:
             st.session_state.running_state = f.read().strip() == 'True'
     except:
         st.session_state.running_state = False
-    # If restored as running, fetch data again (session_state was cleared by reload)
+
+    # Restore refresh interval from file
+    try:
+        interval_path = os.path.join(os.path.dirname(__file__), 'refresh_interval.txt')
+        if os.path.exists(interval_path):
+            with open(interval_path, 'r') as f:
+                saved_interval = int(f.read().strip())
+                st.session_state.refresh_interval_slider = saved_interval
+        else:
+            st.session_state.refresh_interval_slider = 5
+    except:
+        st.session_state.refresh_interval_slider = 5
+
+    # If restored as running, fetch all data (UI filters display)
     if st.session_state.running_state and not st.session_state.get('fetched_items'):
-        all_internal_names = [src[0] for src in sources_data]
-        fetch_all_data(all_internal_names)
+        all_sources = [src[0] for src in sources_data]
+        fetch_all_data(all_sources)
 
 # Custom styled START/STOP button
 if st.session_state.running_state:
@@ -430,8 +567,8 @@ if clicked:
     if st.session_state.running_state:
         # Starting: fetch ALL sources and enable background thread
         BG_CONFIG["running"] = True
-        all_internal_names = [src[0] for src in sources_data]
-        fetch_all_data(all_internal_names)
+        all_sources = [src[0] for src in sources_data]
+        fetch_all_data(all_sources)
     else:
         # Stopping: disable background thread and clear displayed data
         BG_CONFIG["running"] = False
@@ -458,7 +595,32 @@ st.sidebar.subheader("🔄 Auto Refresh")
 enable_auto = st.sidebar.toggle("Enable Background Fetching", value=True)
 
 if enable_auto:
-    auto_refresh_interval = st.sidebar.slider("Interval (Minutes)", min_value=1, max_value=60, value=5)
+    # Ensure session state exists for the key
+    if "refresh_interval_slider" not in st.session_state:
+        st.session_state.refresh_interval_slider = 5
+        
+    auto_refresh_interval = st.sidebar.slider(
+        "Interval (Minutes)", 
+        min_value=1, 
+        max_value=60, 
+        key="refresh_interval_slider"
+    )
+    
+    # Save to file on change
+    try:
+        interval_path = os.path.join(os.path.dirname(__file__), 'refresh_interval.txt')
+        # Only write if the value actually differs from what we think is stored
+        should_write = True
+        if os.path.exists(interval_path):
+            with open(interval_path, 'r') as f:
+                if f.read().strip() == str(auto_refresh_interval):
+                    should_write = False
+        
+        if should_write:
+            with open(interval_path, 'w') as f:
+                f.write(str(auto_refresh_interval))
+    except:
+        pass
 else:
     auto_refresh_interval = 0
 
@@ -500,7 +662,7 @@ TIMEZONE_OPTIONS = {
 tz_names = list(TIMEZONE_OPTIONS.keys())
 # Default to UTC+07:00 (Bangkok)
 default_tz_idx = tz_names.index("UTC+07:00 (Bangkok/Jakarta)")
-selected_tz_name = st.sidebar.selectbox("เลือก Timezone ของคุณ", tz_names, index=default_tz_idx, key="user_timezone")
+selected_tz_name = st.sidebar.selectbox("Select Your Timezone", tz_names, index=default_tz_idx, key="user_timezone")
 user_utc_offset_hours = TIMEZONE_OPTIONS[selected_tz_name]
 user_tz = timezone(timedelta(hours=user_utc_offset_hours))
 
@@ -552,8 +714,8 @@ if enable_auto and auto_refresh_interval > 0 and st.session_state.get('running_s
     with st.sidebar:
         components.html(f"""
         <div style='background:rgba(255,255,255,0.08);border-radius:8px;padding:10px;font-size:12px;font-family:sans-serif;'>
-            <div style='color:#aaa;'>📡 กวาดข่าวล่าสุด: <b style='color:white'>{last_time_str}</b></div>
-            <div style='color:#aaa;margin-top:4px;'>🔜 ครั้งถัดไปเวลา: <b style='color:white'>{next_time_str}</b></div>
+            <div style='color:#aaa;'>📡 Last Fetched: <b style='color:white'>{last_time_str}</b></div>
+            <div style='color:#aaa;margin-top:4px;'>🔜 Next Refresh: <b style='color:white'>{next_time_str}</b></div>
             <div id='cd' style='font-weight:bold;font-size:16px;margin-top:4px;color:#00CC44;'>--:--</div>
         </div>
         <script>
@@ -565,7 +727,7 @@ if enable_auto and auto_refresh_interval > 0 and st.session_state.get('running_s
             const el = document.getElementById('cd');
             if (!el) return;
             if (fetchTs === 0 || intervalMs === 0) {{
-                el.textContent = '⏳ ยังไม่ได้กวาดข่าว';
+                el.textContent = '⏳ Not Fetched Yet';
                 el.style.color = '#aaa';
                 return;
             }}
@@ -577,7 +739,7 @@ if enable_auto and auto_refresh_interval > 0 and st.session_state.get('running_s
             // Auto-reload page when countdown hits 0 so Streamlit picks up new fetch time
             if (remaining === 0 && !reloaded) {{
                 reloaded = true;
-                el.textContent = '🔄 กำลังอัปเดต...';
+                el.textContent = '🔄 Updating...';
                 setTimeout(() => window.top.location.reload(), 2000);
             }}
         }}
@@ -801,12 +963,52 @@ else:
             </div>
             """, unsafe_allow_html=True)
 
-    # Use fixed categories to avoid tab jumping when sources change
-    fixed_categories = ["ข่าวด่วน (Breaking)", "เทคโนโลยี (Tech)", "การศึกษา (Education)", "การเมือง (Politics)", "การเงิน (Finance)", "เศรษฐกิจ (Economy)", "บันเทิง (Entertainment)", "ทั่วไป (General)"]
-    
-    # Create Navigation Bar (using radio for state persistence)
+
+    fixed_categories = ["Breaking", "Technology", "Education", "Politics", "Finance", "Economy", "Entertainment", "General"]
     tab_options = ["📊 Digg Stack", "All Feed"] + fixed_categories
-    active_tab = st.radio("Navigation", tab_options, horizontal=True, label_visibility="collapsed")
+    
+    # Use shorter names for tabs to ensure they fit nicely
+    tab_options = ["📊 Digg Stack", "All Feed", "Breaking", "Technology", "Education", "Politics", "Finance", "Economy", "Entertainment", "General"]
+    
+    if 'active_tab' not in st.session_state:
+        st.session_state.active_tab = "📊 Digg Stack"
+    
+    st.markdown("""
+    <style>
+        .stButton > button {
+            white-space: nowrap !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+        }
+        .stButton > button[kind="secondary"] {
+            border-radius: 20px !important;
+            border: 1px solid rgba(255,255,255,0.1) !important;
+            background: rgba(255,255,255,0.02) !important;
+            color: #AAA !important;
+            font-size: 12px !important;
+            padding: 4px 10px !important;
+            min-height: 32px !important;
+        }
+        .stButton > button[kind="primary"] {
+            border-radius: 20px !important;
+            background: #4285F4 !important;
+            border: 1px solid #4285F4 !important;
+            color: white !important;
+            font-size: 12px !important;
+            padding: 4px 10px !important;
+            min-height: 32px !important;
+            box-shadow: 0 4px 12px rgba(66, 133, 244, 0.3) !important;
+        }
+    </style>
+    """, unsafe_allow_html=True)
+
+    tab_cols = st.columns(len(tab_options))
+    for idx, opt in enumerate(tab_options):
+        is_active = st.session_state.active_tab == opt
+        if tab_cols[idx].button(opt, key=f"nav_btn_{idx}", use_container_width=True, type="primary" if is_active else "secondary"):
+            st.session_state.active_tab = opt
+            st.rerun()
+    active_tab = st.session_state.active_tab
     
     # "All" Tab
     if active_tab == "All Feed":
@@ -854,7 +1056,7 @@ else:
                 canvas.height = 600; 
                 let rawData = []; // Populated by Python
                 
-                const CATEGORIES = ["ข่าวด่วน (Breaking)", "เทคโนโลยี (Tech)", "การศึกษา (Education)", "การเมือง (Politics)", "การเงิน (Finance)", "เศรษฐกิจ (Economy)", "บันเทิง (Entertainment)", "ทั่วไป (General)"];
+                const CATEGORIES = ["Breaking", "Technology", "Education", "Politics", "Finance", "Economy", "Entertainment", "General"];
                 const COLORS = {
                     "Reddit": "#FF4500",
                     "Pantip": "#3f3652",
