@@ -168,12 +168,21 @@ def assign_topic_category(text_to_search, fallback_category):
             "th": ['บันเทิง', 'ภาพยนตร์', 'หนัง', 'เพลง', 'ดารา', 'ซีรีส์', 'คอนเสิร์ต', 'เกม', 'ศิลปิน']
         },
         "Politics": {
-            "en": [r'politics', r'government', r'election', r'president', r'minister', r'parliament', r'senate', r'diplomacy'],
-            "th": ['การเมือง', 'เลือกตั้ง', 'รัฐบาล', 'นายก', 'สภา', 'ประท้วง', 'พรรค', 'กมล']
+            "en": [r'politics', r'government', r'election', r'president', r'minister', r'parliament', r'senate', r'diplomacy', 
+                   r'starmer', r'biden', r'trump', r'putin', r'zelensky', r'cabinet', r'senator', r'congress', 
+                   r'white house', r'labour', r'tory', r'republican', r'democrat', r'policy', r'sanction', r'treaty', 
+                   r'summit', r'war', r'military', r'pentagon', r'defense', r'nato', r'un', r'asean', r'missile', 
+                   r'nuclear', r'iran', r'israel', r'gaza', r'hamas', r'hezbollah', r'ukraine', r'russia', r'china', 
+                   r'taiwan', r'irgc', r'cia', r'fbi'],
+            "th": ['การเมือง', 'เลือกตั้ง', 'รัฐบาล', 'นายก', 'สภา', 'ประท้วง', 'พรรค', 'ครม', 'รัฐมนตรี', 'ทักษิณ', 
+                   'ปชน', 'ปชป', 'ก้าวไกล', 'เพื่อไทย', 'ภูมิใจไทย', 'พลังประชารัฐ', 'ม็อบ', 'ชุมนุม', 'กฎหมาย', 
+                   'รัฐธรรมนูญ', 'ส.ส.', 'ส.ว.', 'วุฒิสภา', 'กกต', 'ปปช', 'ศาลรัฐธรรมนูญ', 'พ.ร.บ.', 'พ.ร.ก.', 
+                   'กม.', 'สงคราม', 'ทหาร', 'กลาโหม', 'ความมั่นคง', 'อาวุธ', 'อิหร่าน', 'อิสราเอล', 'ยูเครน', 
+                   'รัสเซีย', 'จีน', 'ไต้หวัน']
         },
         "General": {
             "en": [r'news', r'general', r'world', r'local', r'society', r'culture'],
-            "th": ['ทั่วไป', 'สังคม', 'วัฒนธรรม', 'ชาวบ้าน', 'สรุป']
+            "th": ['ทั่วไป', 'สังคม', 'วัฒนธรรม', 'ชาวบ้าน', 'สรุป', 'รอบวัน', 'รอบโลก']
         }
     }
     
@@ -893,7 +902,7 @@ else:
     # Save to file for API server (handles thread reload issues)
     import json
     import os
-    file_path = r'd:\JoopFirebase\Digg Like\current_feed.json'
+    file_path = os.path.join(os.path.dirname(__file__), 'current_feed.json')
     with open(file_path, 'w', encoding='utf-8') as f:
         json.dump(filtered_items, f, ensure_ascii=False)
 
@@ -1308,8 +1317,9 @@ else:
                 
                 canvas.addEventListener('mousemove', (e) => {
                     const rect = canvas.getBoundingClientRect();
-                    mouseX = e.clientX - rect.left;
-                    mouseY = e.clientY - rect.top;
+                    // Scale mouse coordinates to match internal canvas resolution
+                    mouseX = (e.clientX - rect.left) * (canvas.width / rect.width);
+                    mouseY = (e.clientY - rect.top) * (canvas.height / rect.height);
                     
                     hoveredBlockUrl = null;
                     hoveredBlockSource = null;
