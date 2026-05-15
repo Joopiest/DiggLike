@@ -10,8 +10,12 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 import streamlit.components.v1 as components
 import os
 from datetime import datetime, timezone, timedelta
-from wordcloud import WordCloud
-import matplotlib.pyplot as plt
+try:
+    from wordcloud import WordCloud
+    import matplotlib.pyplot as plt
+except ImportError:
+    WordCloud = None
+    import matplotlib.pyplot as plt
 try:
     from pythainlp.tokenize import word_tokenize
     from pythainlp.corpus import thai_stopwords
@@ -78,15 +82,32 @@ st.set_page_config(page_title="My Local Digg", page_icon="📈", layout="wide")
 # --- Custom CSS for aesthetic ---
 st.markdown("""
     <style>
+    /* Import Premium Fonts */
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Sarabun:wght@300;400;700&display=swap');
+
+    html, body, [data-testid="stAppViewContainer"] {
+        font-family: 'Inter', 'Sarabun', sans-serif !important;
+        background-color: #0F172A !important; /* Deeper Dark Blue */
+    }
+
     .post-container {
-        border: 1px solid #ddd;
-        border-radius: 10px;
-        padding: 15px;
-        margin-bottom: 15px;
-        background-color: #f9f9f9;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 16px;
+        padding: 20px;
+        margin-bottom: 20px;
+        background: rgba(255, 255, 255, 0.03);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
         display: flex;
         flex-direction: row;
         align-items: flex-start;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .post-container:hover {
+        background: rgba(255, 255, 255, 0.06);
+        border-color: rgba(255, 255, 255, 0.2);
+        transform: translateY(-4px);
+        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
     }
     .score-box {
         display: flex;
@@ -95,11 +116,16 @@ st.markdown("""
         justify-content: center;
         width: 80px;
         margin-right: 20px;
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 12px;
+        padding: 10px;
     }
     .score-number {
-        font-size: 24px;
-        font-weight: bold;
-        color: #ff4500;
+        font-size: 26px;
+        font-weight: 800;
+        background: linear-gradient(135deg, #FF6B35, #FF4500);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
         margin: 5px 0;
     }
     .post-content {
@@ -107,22 +133,27 @@ st.markdown("""
     }
     .post-title {
         font-size: 20px;
-        font-weight: bold;
-        color: #222;
+        font-weight: 700;
+        color: #F8FAFC;
         text-decoration: none;
+        line-height: 1.4;
     }
     .post-source {
         font-size: 14px;
-        color: #888;
-        margin-top: 5px;
+        color: #94A3B8;
+        margin-top: 8px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
     }
     .tag {
-        background-color: #e0e0e0;
-        padding: 3px 8px;
-        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.1);
+        padding: 4px 12px;
+        border-radius: 20px;
         font-size: 12px;
-        color: #555;
-        margin-right: 10px;
+        color: #CBD5E1;
+        font-weight: 600;
+        border: 1px solid rgba(255, 255, 255, 0.05);
     }
     </style>
 """, unsafe_allow_html=True)
@@ -154,28 +185,28 @@ def assign_topic_category(text_to_search, fallback_category):
     # Order matters: more specific categories should come before general ones
     keywords = {
         "Breaking": {
-            "en": [r'breaking', r'urgent', r'alert', r'crisis', r'latest'],
-            "th": ['ด่วน', 'ข่าวด่วน', 'อัปเดต', 'ประกาศสำคัญ']
+            "en": [r'breaking', r'urgent', r'alert', r'crisis', r'latest', r'just in', r'live'],
+            "th": ['ด่วน', 'ข่าวด่วน', 'อัปเดต', 'ประกาศสำคัญ', 'เกาะติด']
         },
         "Technology": {
-            "en": [r'tech', r'technology', r'smartphone', r'software', r'hardware', r'ai', r'cyber', r'robot', r'apple', r'google', r'microsoft', r'tesla', r'nvidia'],
-            "th": ['มือถือ', 'ไอที', 'คอมพิวเตอร์', 'หุ่นยนต์', 'สมาร์ทโฟน', 'แอพ', 'แอป', 'เทคโนโลยี', 'อวกาศ']
+            "en": [r'tech', r'technology', r'smartphone', r'software', r'hardware', r'ai', r'cyber', r'robot', r'apple', r'google', r'microsoft', r'tesla', r'nvidia', r'semiconductor', r'quantum', r'startup', r'innovation'],
+            "th": ['มือถือ', 'ไอที', 'คอมพิวเตอร์', 'หุ่นยนต์', 'สมาร์ทโฟน', 'แอพ', 'แอป', 'เทคโนโลยี', 'อวกาศ', 'นวัตกรรม', 'ยานยนต์ไฟฟ้า', 'อีวี', 'ปัญญาประดิษฐ์']
         },
         "Economy": {
-            "en": [r'economy', r'economic', r'gdp', r'inflation', r'trade', r'export', r'import', r'recession'],
-            "th": ['เศรษฐกิจ', 'ส่งออก', 'เงินเฟ้อ', 'จีดีพี', 'ภาษี', 'พาณิชย์']
+            "en": [r'economy', r'economic', r'gdp', r'inflation', r'trade', r'export', r'import', r'recession', r'tax', r'budget', r'tariff', r'fiscal', r'monetary'],
+            "th": ['เศรษฐกิจ', 'ส่งออก', 'เงินเฟ้อ', 'จีดีพี', 'ภาษี', 'พาณิชย์', 'งบประมาณ', 'ดุลการค้า', 'ค่าเงิน']
         },
         "Finance": {
-            "en": [r'finance', r'bank', r'stock', r'crypto', r'investment', r'market', r'bitcoin', r'btc', r'eth', r'nasdaq', r'gold'],
-            "th": ['หุ้น', 'การเงิน', 'ธนาคาร', 'คริปโต', 'บิทคอยน์', 'ทองคำ', 'ดอกเบี้ย', 'เงินฝาก', 'เซต', 'set']
+            "en": [r'finance', r'bank', r'stock', r'crypto', r'investment', r'market', r'bitcoin', r'btc', r'eth', r'nasdaq', r'gold', r'dividend', r'portfolio', r'forex', r'insurance'],
+            "th": ['หุ้น', 'การเงิน', 'ธนาคาร', 'คริปโต', 'บิทคอยน์', 'ทองคำ', 'ดอกเบี้ย', 'เงินฝาก', 'เซต', 'set', 'ปันผล', 'ลงทุน', 'กองทุน']
         },
         "Education": {
-            "en": [r'education', r'university', r'school', r'student', r'teacher', r'college', r'exam', r'scholarship', r'learning'],
-            "th": ['การศึกษา', 'นักเรียน', 'นักศึกษา', 'มหาวิทยาลัย', 'โรงเรียน', 'สอบ', 'ทุนการศึกษา', 'เรียนต่อ']
+            "en": [r'education', r'university', r'school', r'student', r'teacher', r'college', r'exam', r'scholarship', r'learning', r'academic', r'curriculum', r'literacy'],
+            "th": ['การศึกษา', 'นักเรียน', 'นักศึกษา', 'มหาวิทยาลัย', 'โรงเรียน', 'สอบ', 'ทุนการศึกษา', 'เรียนต่อ', 'วิชาการ', 'ครู', 'หลักสูตร']
         },
         "Entertainment": {
-            "en": [r'entertainment', r'movie', r'music', r'celebrity', r'hollywood', r'netflix', r'kpop', r'anime', r'gaming', r'esports'],
-            "th": ['บันเทิง', 'ภาพยนตร์', 'หนัง', 'เพลง', 'ดารา', 'ซีรีส์', 'คอนเสิร์ต', 'เกม', 'ศิลปิน']
+            "en": [r'entertainment', r'movie', r'music', r'celebrity', r'hollywood', r'netflix', r'kpop', r'anime', r'gaming', r'esports', r'drama', r'showbiz', r'streaming', r'concert'],
+            "th": ['บันเทิง', 'ภาพยนตร์', 'หนัง', 'เพลง', 'ดารา', 'ซีรีส์', 'คอนเสิร์ต', 'เกม', 'ศิลปิน', 'ละคร', 'วงการบันเทิง', 'สตรีมมิ่ง']
         },
         "Politics": {
             "en": [r'politics', r'government', r'election', r'president', r'minister', r'parliament', r'senate', r'diplomacy', 
@@ -183,16 +214,16 @@ def assign_topic_category(text_to_search, fallback_category):
                    r'white house', r'labour', r'tory', r'republican', r'democrat', r'policy', r'sanction', r'treaty', 
                    r'summit', r'war', r'military', r'pentagon', r'defense', r'nato', r'un', r'asean', r'missile', 
                    r'nuclear', r'iran', r'israel', r'gaza', r'hamas', r'hezbollah', r'ukraine', r'russia', r'china', 
-                   r'taiwan', r'irgc', r'cia', r'fbi'],
+                   r'taiwan', r'irgc', r'cia', r'fbi', r'protest', r'veto', r'legal', r'court'],
             "th": ['การเมือง', 'เลือกตั้ง', 'รัฐบาล', 'นายก', 'สภา', 'ประท้วง', 'พรรค', 'ครม', 'รัฐมนตรี', 'ทักษิณ', 
                    'ปชน', 'ปชป', 'ก้าวไกล', 'เพื่อไทย', 'ภูมิใจไทย', 'พลังประชารัฐ', 'ม็อบ', 'ชุมนุม', 'กฎหมาย', 
                    'รัฐธรรมนูญ', 'ส.ส.', 'ส.ว.', 'วุฒิสภา', 'กกต', 'ปปช', 'ศาลรัฐธรรมนูญ', 'พ.ร.บ.', 'พ.ร.ก.', 
                    'กม.', 'สงคราม', 'ทหาร', 'กลาโหม', 'ความมั่นคง', 'อาวุธ', 'อิหร่าน', 'อิสราเอล', 'ยูเครน', 
-                   'รัสเซีย', 'จีน', 'ไต้หวัน']
+                   'รัสเซีย', 'จีน', 'ไต้หวัน', 'พรรคร่วม', 'ปรับครม']
         },
         "General": {
-            "en": [r'news', r'general', r'world', r'local', r'society', r'culture'],
-            "th": ['ทั่วไป', 'สังคม', 'วัฒนธรรม', 'ชาวบ้าน', 'สรุป', 'รอบวัน', 'รอบโลก']
+            "en": [r'news', r'general', r'world', r'local', r'society', r'culture', r'lifestyle', r'health', r'environment', r'weather', r'travel'],
+            "th": ['ทั่วไป', 'สังคม', 'วัฒนธรรม', 'ชาวบ้าน', 'สรุป', 'รอบวัน', 'รอบโลก', 'สุขภาพ', 'สิ่งแวดล้อม', 'สภาพอากาศ', 'ท่องเที่ยว']
         }
     }
     
@@ -785,99 +816,110 @@ st.sidebar.markdown("<div style='text-align: center; color: #bbb; font-size: 15p
 
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;700&display=swap');
-    body, .stApp, p, div, h1, h2, h3 {
-        font-family: 'Sarabun', sans-serif !important;
+    /* Import Premium Fonts */
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Sarabun:wght@300;400;700&display=swap');
+    
+    body, .stApp, p, div, h1, h2, h3, span {
+        font-family: 'Inter', 'Sarabun', sans-serif !important;
     }
-    span:not([class*="icon"]):not([data-testid*="Icon"]):not(.material-symbols-rounded):not(.material-icons) {
-        font-family: 'Sarabun', sans-serif !important;
-    }
+    
     /* Navigation bar: neat multi-row with spacing */
     [data-testid="stRadio"] > div {
         flex-wrap: wrap !important;
-        gap: 6px 8px !important;
+        gap: 8px 12px !important;
     }
     [data-testid="stRadio"] > div > label {
-        font-size: 13px !important;
-        padding: 4px 10px !important;
-        white-space: nowrap !important;
-        margin-bottom: 6px !important;
+        font-size: 14px !important;
+        padding: 8px 16px !important;
+        background: rgba(255, 255, 255, 0.05) !important;
+        border: 1px solid rgba(255, 255, 255, 0.1) !important;
+        border-radius: 50px !important;
+        transition: all 0.2s ease !important;
     }
-    /* START button: red, STOP button: green */
-    [data-testid="stSidebar"] button[kind="primary"] {
-        border: none !important;
-        font-weight: bold !important;
-        font-size: 16px !important;
-        padding: 12px !important;
-        border-radius: 8px !important;
+    [data-testid="stRadio"] > div > label:hover {
+        background: rgba(255, 255, 255, 0.1) !important;
     }
+    
     .news-card {
-        background: rgba(255, 255, 255, 0.02);
-        border-radius: 12px;
-        padding: 16px;
-        margin-bottom: 12px;
-        border: 1px solid rgba(255, 255, 255, 0.05);
-        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        background: rgba(255, 255, 255, 0.03);
+        backdrop-filter: blur(8px);
+        border-radius: 16px;
+        padding: 18px;
+        margin-bottom: 15px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
         display: flex;
         align-items: center;
         justify-content: space-between;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
     }
     .news-card:hover {
-        background: rgba(255, 255, 255, 0.05);
-        transform: translateY(-2px);
-        border-color: rgba(255, 255, 255, 0.1);
-        box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        background: rgba(255, 255, 255, 0.07);
+        transform: scale(1.02) translateY(-4px);
+        border-color: rgba(66, 133, 244, 0.3);
+        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.2), 0 10px 10px -5px rgba(0, 0, 0, 0.1);
     }
     .source-badge {
         display: inline-block;
-        padding: 3px 10px;
-        border-radius: 6px;
+        padding: 4px 12px;
+        border-radius: 8px;
         font-size: 11px;
-        font-weight: bold;
+        font-weight: 800;
+        letter-spacing: 0.05em;
         text-transform: uppercase;
-        margin-right: 10px;
+        margin-right: 12px;
         color: white;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
     }
     .category-badge {
         display: inline-block;
-        padding: 3px 10px;
-        border-radius: 6px;
+        padding: 4px 12px;
+        border-radius: 8px;
         font-size: 11px;
-        background: rgba(255, 255, 255, 0.08);
-        color: #AAA;
-        font-weight: 500;
+        background: rgba(255, 255, 255, 0.12);
+        color: #94A3B8;
+        font-weight: 700;
+        text-transform: uppercase;
     }
     .news-title {
-        font-size: 16px;
+        font-size: 17px;
         font-weight: 600;
-        color: #FFF;
+        color: #F8FAFC;
         text-decoration: none;
         display: block;
-        margin-top: 8px;
+        margin-top: 10px;
+        line-height: 1.5;
+        transition: color 0.2s ease;
     }
     .news-title:hover {
-        color: #4285F4 !important;
+        color: #60A5FA !important;
     }
     .score-box {
-        font-size: 18px;
-        font-weight: 800;
+        font-size: 22px;
+        font-weight: 900;
         text-align: center;
-        min-width: 40px;
+        min-width: 50px;
+        background: linear-gradient(135deg, #FF6B35, #FF4500);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
     }
     /* Hide default Streamlit button borders for a cleaner look */
     .stButton > button {
         border: none !important;
         background: transparent !important;
-        font-size: 20px !important;
+        font-size: 24px !important;
         padding: 0 !important;
-        color: #666 !important;
+        color: rgba(255, 255, 255, 0.4) !important;
         height: auto !important;
         line-height: 1 !important;
+        transition: all 0.2s ease !important;
     }
     .stButton > button:hover {
         color: #FFF !important;
+        transform: scale(1.2);
         background: transparent !important;
     }
+</style>
 </style>
 """, unsafe_allow_html=True)
 
@@ -994,49 +1036,17 @@ else:
 
     fixed_categories = ["Breaking", "Technology", "Education", "Politics", "Finance", "Economy", "Entertainment", "General"]
     tab_options = ["📊 Digg Stack", "All Feed", "Breaking", "Technology", "Education", "Politics", "Finance", "Economy", "Entertainment", "General"]
-    
     if 'active_tab' not in st.session_state:
         st.session_state.active_tab = "📊 Digg Stack"
-    
-    st.markdown("""
-    <style>
-        .stButton > button {
-            white-space: nowrap !important;
-            overflow: hidden !important;
-            text-overflow: ellipsis !important;
-        }
-        .stButton > button[kind="secondary"] {
-            border-radius: 20px !important;
-            border: 1px solid rgba(255,255,255,0.1) !important;
-            background: rgba(255,255,255,0.02) !important;
-            color: #AAA !important;
-            font-size: 12px !important;
-            padding: 4px 10px !important;
-            min-height: 32px !important;
-        }
-        .stButton > button[kind="primary"] {
-            border-radius: 20px !important;
-            background: #4285F4 !important;
-            border: 1px solid #4285F4 !important;
-            color: white !important;
-            font-size: 12px !important;
-            padding: 4px 10px !important;
-            min-height: 32px !important;
-            box-shadow: 0 4px 12px rgba(66, 133, 244, 0.3) !important;
-        }
-    </style>
-    """, unsafe_allow_html=True)
-
-    # --- Native Interactive Word Cloud (Bilingual) ---
-    with st.expander("☁️ Explore Topic Word Cloud (Interactive Mode)"):
-        if not filtered_items:
+    with st.expander("☁️ Explore Topic Word Cloud (Independent Space Mode)"):
+        if not st.session_state.get('fetched_items'):
             st.write("No data available for Word Cloud.")
         else:
             try:
                 from collections import Counter
                 import re
 
-                # 1. Combine and Clean Text
+                # 1. Combined and Clean Text
                 all_titles = " ".join([item['title'] for item in filtered_items])
                 
                 # 2. Expanded Stopwords (Thai + English)
@@ -1064,14 +1074,22 @@ else:
                     t_clean = re.sub(r"['\u2019]s$", "", t_clean)
                     if len(t_clean) > 1 and not t_clean.isdigit() and t_clean not in stop_words:
                         clean_tokens.append(t_clean)
+                word_counts = Counter(clean_tokens).most_common(50) # Increased to 50 for more stars
                 
-                word_counts = Counter(clean_tokens).most_common(30) # Top 30 for clear UI
+                # Filter out very low frequency words if there are many words
+                if len(word_counts) > 20:
+                    word_counts = [wc for wc in word_counts if wc[1] > 1]
+                
+                word_counts = word_counts[:30] # Keep top 30 for UI
                 
                 if not word_counts:
                     st.write("Not enough significant words found.")
+                elif WordCloud is None:
+                    st.info("☁️ Word Cloud library is installing... Please wait a moment and refresh.")
+                    # Show words as simple list as fallback
+                    st.write(", ".join([f"{w}({c})" for w, c in word_counts]))
                 else:
-                    # 4. Animated Native Word Cloud (The best of both worlds)
-                    st.write("✨ Click a floating star to filter news:")
+                    st.write("✨ Each star floats independently. Click to filter:")
                     
                     def select_word_callback(w):
                         st.session_state.search_input_val = w
@@ -1082,61 +1100,52 @@ else:
                     st.markdown("""
                     <style>
                         div[data-testid="stExpander"] div[data-testid="stButton"] button {
-                            background: rgba(255, 255, 255, 0.05) !important;
-                            border: 1px solid rgba(255, 255, 255, 0.1) !important;
+                            background: rgba(255, 255, 255, 0.04) !important;
+                            border: 1px solid rgba(255, 255, 255, 0.08) !important;
                             border-radius: 50px !important;
-                            color: white !important;
-                            font-weight: bold !important;
-                            transition: all 0.3s ease !important;
-                            animation: spaceFloat 7s ease-in-out infinite !important;
+                            color: #CBD5E1 !important;
+                            font-weight: 600 !important;
+                            font-size: 13px !important;
+                            padding: 8px 16px !important;
+                            transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) !important;
+                            animation: spaceFloat 10s ease-in-out infinite !important;
+                            backdrop-filter: blur(4px);
                         }
                         
                         @keyframes spaceFloat {
-                            0% { transform: translate(0, 0); }
-                            33% { transform: translate(5px, -8px); }
-                            66% { transform: translate(-3px, 8px); }
-                            100% { transform: translate(0, 0); }
+                            0% { transform: translate(0, 0) rotate(0deg); }
+                            33% { transform: translate(6px, -10px) rotate(1deg); }
+                            66% { transform: translate(-4px, 10px) rotate(-1deg); }
+                            100% { transform: translate(0, 0) rotate(0deg); }
                         }
 
                         div[data-testid="stExpander"] div[data-testid="stButton"] button:hover {
-                            background: rgba(66, 133, 244, 0.2) !important;
-                            border-color: #4285F4 !important;
-                            transform: scale(1.2) !important;
-                            box-shadow: 0 0 15px rgba(66, 133, 244, 0.4) !important;
+                            background: rgba(59, 130, 246, 0.2) !important;
+                            border-color: #3B82F6 !important;
+                            color: white !important;
+                            transform: scale(1.15) !important;
+                            box-shadow: 0 0 20px rgba(59, 130, 246, 0.5) !important;
+                            z-index: 10;
                         }
 
-                        div[data-testid="stExpander"] div[data-testid="stButton"]:nth-child(2n) button { animation-duration: 9s !important; animation-delay: -1.5s !important; }
-                        div[data-testid="stExpander"] div[data-testid="stButton"]:nth-child(3n) button { animation-duration: 11s !important; animation-delay: -4.2s !important; }
-                        div[data-testid="stExpander"] div[data-testid="stButton"]:nth-child(4n) button { animation-duration: 13s !important; animation-delay: -2.8s !important; }
-                        div[data-testid="stExpander"] div[data-testid="stButton"]:nth-child(5n) button { animation-duration: 7.5s !important; animation-delay: -6.1s !important; }
-                        div[data-testid="stExpander"] div[data-testid="stButton"]:nth-child(7n) button { animation-duration: 15s !important; animation-delay: -3.3s !important; }
-                        div[data-testid="stExpander"] div[data-testid="stButton"]:nth-child(11n) button { animation-duration: 10s !important; animation-delay: -0.5s !important; }
+                        div[data-testid="stExpander"] div[data-testid="stButton"]:nth-child(2n) button { animation-duration: 12s !important; animation-delay: -2s !important; }
+                        div[data-testid="stExpander"] div[data-testid="stButton"]:nth-child(3n) button { animation-duration: 15s !important; animation-delay: -5s !important; }
+                        div[data-testid="stExpander"] div[data-testid="stButton"]:nth-child(5n) button { animation-duration: 9s !important; animation-delay: -7s !important; }
                     </style>
                     """, unsafe_allow_html=True)
-                    
-                    max_count = word_counts[0][1]
-                    min_count = word_counts[-1][1]
                     
                     # Display words as floating buttons
                     rows = [word_counts[i:i + 5] for i in range(0, len(word_counts), 5)]
                     for row_idx, row in enumerate(rows):
                         cols = st.columns(5)
                         for i, (word, count) in enumerate(row):
-                            is_top = count > (max_count + min_count) / 1.5
-                            # Add count in parentheses
+                            max_count = word_counts[0][1]
+                            min_count = word_counts[-1][1]
+                            is_top = count > (max_count + min_count) / 2
                             label = f"⭐ {word.upper()} ({count})" if is_top else f"{word} ({count})"
-                            
-                            # Use on_click callback to avoid state modification error
-                            cols[i].button(
-                                label, 
-                                key=f"wc_float_{word}_{row_idx}_{i}", 
-                                use_container_width=True,
-                                on_click=select_word_callback,
-                                args=(word,)
-                            )
-
+                            cols[i].button(label, key=f"wc_{row_idx}_{i}", on_click=select_word_callback, args=(word,), use_container_width=True)
             except Exception as e:
-                st.error(f"Could not generate Animated Word Cloud: {e}")
+                st.error(f"Could not generate Word Cloud: {e}")
 
     tab_cols = st.columns(len(tab_options))
     for idx, opt in enumerate(tab_options):
@@ -1195,19 +1204,22 @@ else:
                 const CATEGORIES = ["Breaking", "Technology", "Education", "Politics", "Finance", "Economy", "Entertainment", "General"];
                 const COLORS = {
                     "Reddit": "#FF4500",
-                    "Pantip": "#3f3652",
-                    "Google News TH": "#4285F4",
-                    "Google News TH (IT)": "#FBBC05",
-                    "BBC News": "#B80000",
-                    "CNN": "#CC0000",
-                    "Al Jazeera": "#FF9900",
-                    "Thairath": "#009944",
-                    "Blognone": "#005588",
-                    "The Standard": "#000000",
-                    "Krungthep Turakij": "#003366",
-                    "Spaceth.co": "#0A0E17",
-                    "Phys.org": "#2B4C7E",
-                    "Space.com": "#00518A"
+                    "Pantip": "#6366F1",
+                    "Google News TH": "#3B82F6",
+                    "Google News TH (IT)": "#F59E0B",
+                    "BBC News": "#EF4444",
+                    "CNN": "#DC2626",
+                    "Al Jazeera": "#F97316",
+                    "Thairath": "#10B981",
+                    "Blognone": "#0EA5E9",
+                    "The Standard": "#475569",
+                    "Krungthep Turakij": "#1E40AF",
+                    "Spaceth.co": "#334155",
+                    "Phys.org": "#3B82F6",
+                    "Space.com": "#0369A1",
+                    "MIT Tech Review": "#E11D48",
+                    "Wired": "#111827",
+                    "Physics World": "#2563EB"
                 };
                 
                 let blocks = [];
@@ -1261,56 +1273,39 @@ else:
                         let currentCamY = cameraY[this.col] || 0;
                         let drawY = this.y + currentCamY;
                         
-                        // 1. Base Shape with Shadow
+                        if (drawY + this.height < 0 || drawY > canvas.height) return; // Culling
+
+                        // 1. Shadow & Glass Glow
                         ctx.save();
-                        ctx.shadowColor = "rgba(0, 0, 0, 0.4)";
-                        ctx.shadowBlur = 8;
-                        ctx.shadowOffsetY = 4;
+                        ctx.shadowColor = "rgba(0, 0, 0, 0.5)";
+                        ctx.shadowBlur = 12;
+                        ctx.shadowOffsetY = 6;
                         
+                        // 2. Main Body (Semi-transparent for Glass effect)
                         ctx.fillStyle = this.color;
+                        ctx.globalAlpha = 0.85;
                         ctx.beginPath();
                         if (ctx.roundRect) {
-                            ctx.roundRect(this.x, drawY, this.width, this.height, 6);
+                            ctx.roundRect(this.x, drawY, this.width, this.height, 10);
                         } else {
                             ctx.rect(this.x, drawY, this.width, this.height);
                         }
                         ctx.fill();
-                        ctx.restore(); // Remove shadow
+                        ctx.globalAlpha = 1.0;
                         
-                        // 2. Glossy/Volume Gradient (Light effect)
-                        let grad = ctx.createLinearGradient(this.x, drawY, this.x, drawY + this.height);
-                        grad.addColorStop(0, "rgba(255, 255, 255, 0.25)");
-                        grad.addColorStop(0.3, "rgba(255, 255, 255, 0.05)");
-                        grad.addColorStop(0.7, "rgba(0, 0, 0, 0.05)");
-                        grad.addColorStop(1, "rgba(0, 0, 0, 0.35)");
-                        
+                        // 3. Glossy Reflection
+                        let grad = ctx.createLinearGradient(this.x, drawY, this.x + this.width, drawY + this.height);
+                        grad.addColorStop(0, "rgba(255, 255, 255, 0.15)");
+                        grad.addColorStop(0.5, "rgba(255, 255, 255, 0)");
+                        grad.addColorStop(1, "rgba(0, 0, 0, 0.2)");
                         ctx.fillStyle = grad;
-                        ctx.beginPath();
-                        if (ctx.roundRect) {
-                            ctx.roundRect(this.x, drawY, this.width, this.height, 6);
-                        } else {
-                            ctx.rect(this.x, drawY, this.width, this.height);
-                        }
                         ctx.fill();
                         
-                        // 3. Top Inner Highlight (Bevel)
-                        ctx.strokeStyle = "rgba(255, 255, 255, 0.4)";
-                        ctx.lineWidth = 1;
-                        ctx.beginPath();
-                        ctx.moveTo(this.x + 6, drawY + 1);
-                        ctx.lineTo(this.x + this.width - 6, drawY + 1);
+                        // 4. Premium Border (Glass edge)
+                        ctx.strokeStyle = "rgba(255, 255, 255, 0.25)";
+                        ctx.lineWidth = 1.5;
                         ctx.stroke();
-                        
-                        // 4. Subtle Border
-                        ctx.strokeStyle = "rgba(255, 255, 255, 0.2)";
-                        ctx.lineWidth = 1;
-                        ctx.beginPath();
-                        if (ctx.roundRect) {
-                            ctx.roundRect(this.x, drawY, this.width, this.height, 6);
-                        } else {
-                            ctx.rect(this.x, drawY, this.width, this.height);
-                        }
-                        ctx.stroke();
+                        ctx.restore();
                         
                         // Text Rendering
                         ctx.fillStyle = "white";
