@@ -919,6 +919,25 @@ st.markdown("""
         transform: scale(1.2);
         background: transparent !important;
     }
+    
+    /* Fix Expander Header Overlap (Material Icon Ligature Issue) */
+    [data-testid="stExpander"] [data-testid="stExpanderIcon"],
+    [data-testid="stExpander"] [data-testid="stIconMaterial"] {
+        display: none !important;
+    }
+    [data-testid="stExpander"] summary p {
+        padding-left: 10px;
+        font-size: 16px !important;
+        font-weight: 700 !important;
+        color: #F8FAFC !important;
+        display: block !important;
+        visibility: visible !important;
+    }
+    [data-testid="stExpander"] {
+        border: 1px solid rgba(255, 255, 255, 0.1) !important;
+        border-radius: 12px !important;
+        background: rgba(255, 255, 255, 0.02) !important;
+    }
 </style>
 </style>
 """, unsafe_allow_html=True)
@@ -1038,7 +1057,7 @@ else:
     tab_options = ["📊 Digg Stack", "All Feed", "Breaking", "Technology", "Education", "Politics", "Finance", "Economy", "Entertainment", "General"]
     if 'active_tab' not in st.session_state:
         st.session_state.active_tab = "📊 Digg Stack"
-    with st.expander("☁️ Explore Topic Word Cloud (Independent Space Mode)"):
+    with st.expander("☁️ Explore Topic Word Cloud (Interactive Mode)"):
         if not st.session_state.get('fetched_items'):
             st.write("No data available for Word Cloud.")
         else:
@@ -1552,98 +1571,106 @@ else:
                     
                     // Draw Hover Tooltip (Source + Fetch Time + Full Headline)
                     if (hoveredBlockSource) {
-                        ctx.font = "bold 12px sans-serif";
+                        const TOOLTIP_PADDING = 15;
+                        const LINE_HEIGHT = 22;
+                        const HEADER_FONT = "bold 15px 'Inter', sans-serif";
+                        const BODY_FONT = "14px 'Inter', 'Sarabun', sans-serif";
+                        
+                        ctx.font = HEADER_FONT;
                         let line1 = "📰 " + hoveredBlockSource;
                         let line2 = "🕒 Fetched: " + (hoveredBlockFetchTime || '--:--:--');
                         
-                        // Word-wrap the title to fit tooltip
-                        ctx.font = "12px sans-serif";
+                        // Word-wrap the title
+                        ctx.font = BODY_FONT;
                         let fullTitle = hoveredBlockTitle || '';
-                        let maxTooltipW = 320;
+                        let maxTooltipW = 380; // Slightly wider
                         let titleLines = [];
-                        let words = fullTitle.split('');
+                        
+                        // Smarter wrap: Try splitting by spaces for English, then chars
+                        let words = fullTitle.split(' ');
                         let currentLine = '';
-                        for (let ch of words) {
-                            let testLine = currentLine + ch;
-                            if (ctx.measureText(testLine).width > maxTooltipW - 20) {
-                                titleLines.push(currentLine);
-                                currentLine = ch;
+                        for (let word of words) {
+                            let testLine = currentLine + (currentLine ? ' ' : '') + word;
+                            if (ctx.measureText(testLine).width > maxTooltipW - (TOOLTIP_PADDING * 2)) {
+                                if (currentLine) {
+                                    titleLines.push(currentLine);
+                                    currentLine = word;
+                                } else {
+                                    // Single word too long (Thai string or long English word)
+                                    let chars = word.split('');
+                                    for (let ch of chars) {
+                                        if (ctx.measureText(currentLine + ch).width > maxTooltipW - (TOOLTIP_PADDING * 2)) {
+                                            titleLines.push(currentLine);
+                                            currentLine = ch;
+                                        } else {
+                                            currentLine += ch;
+                                        }
+                                    }
+                                }
                             } else {
                                 currentLine = testLine;
                             }
                         }
                         if (currentLine) titleLines.push(currentLine);
-                        // Limit to 4 lines max
-                        if (titleLines.length > 4) {
-                            titleLines = titleLines.slice(0, 4);
-                            titleLines[3] = titleLines[3].substring(0, titleLines[3].length - 2) + '..';
+                        
+                        if (titleLines.length > 5) {
+                            titleLines = titleLines.slice(0, 5);
+                            titleLines[4] += '...';
                         }
                         
                         // Measure widths
-                        ctx.font = "bold 12px sans-serif";
+                        ctx.font = HEADER_FONT;
                         let w1 = ctx.measureText(line1).width;
                         let w2 = ctx.measureText(line2).width;
-                        ctx.font = "12px sans-serif";
+                        ctx.font = BODY_FONT;
                         let maxTitleW = 0;
                         for (let tl of titleLines) {
                             let tw = ctx.measureText(tl).width;
                             if (tw > maxTitleW) maxTitleW = tw;
                         }
-                        let tooltipW = Math.min(maxTooltipW, Math.max(w1, w2, maxTitleW) + 30);
-                        let lineH = 18;
-                        let tooltipH = 12 + lineH * 2 + 6 + lineH * titleLines.length + 10;
                         
-                        // Position tooltip (flip if near edge)
+                        let tooltipW = Math.min(maxTooltipW, Math.max(w1, w2, maxTitleW) + (TOOLTIP_PADDING * 2));
+                        let tooltipH = TOOLTIP_PADDING + (LINE_HEIGHT * 2) + 8 + (LINE_HEIGHT * titleLines.length) + 12;
+                        
                         let tx = mouseX + 15;
                         let ty = mouseY + 15;
                         if (tx + tooltipW > canvas.width) tx = mouseX - tooltipW - 10;
                         if (ty + tooltipH > canvas.height) ty = mouseY - tooltipH - 10;
                         
-                        // Background
-                        ctx.fillStyle = "rgba(0, 0, 0, 0.92)";
+                        // Background (Glassmorphism)
+                        ctx.fillStyle = "rgba(15, 23, 42, 0.96)";
                         ctx.beginPath();
-                        if (ctx.roundRect) {
-                            ctx.roundRect(tx, ty, tooltipW, tooltipH, 8);
-                        } else {
-                            ctx.rect(tx, ty, tooltipW, tooltipH);
-                        }
+                        if (ctx.roundRect) ctx.roundRect(tx, ty, tooltipW, tooltipH, 12);
+                        else ctx.rect(tx, ty, tooltipW, tooltipH);
                         ctx.fill();
                         
                         // Border
-                        ctx.strokeStyle = "rgba(255, 255, 255, 0.15)";
-                        ctx.lineWidth = 1;
-                        ctx.beginPath();
-                        if (ctx.roundRect) {
-                            ctx.roundRect(tx, ty, tooltipW, tooltipH, 8);
-                        } else {
-                            ctx.rect(tx, ty, tooltipW, tooltipH);
-                        }
+                        ctx.strokeStyle = "rgba(255, 255, 255, 0.2)";
+                        ctx.lineWidth = 1.5;
                         ctx.stroke();
                         
-                        // Line 1: Source
-                        ctx.fillStyle = "#FFD700";
-                        ctx.font = "bold 12px sans-serif";
+                        // Render Text
                         ctx.textAlign = "left";
                         ctx.textBaseline = "top";
-                        ctx.fillText(line1, tx + 10, ty + 8);
                         
-                        // Line 2: Fetch time
-                        ctx.fillStyle = "#8BC34A";
-                        ctx.fillText(line2, tx + 10, ty + 8 + lineH);
+                        ctx.fillStyle = "#FACC15"; // Yellow-ish
+                        ctx.font = HEADER_FONT;
+                        ctx.fillText(line1, tx + TOOLTIP_PADDING, ty + TOOLTIP_PADDING);
                         
-                        // Separator line
+                        ctx.fillStyle = "#4ADE80"; // Green-ish
+                        ctx.fillText(line2, tx + TOOLTIP_PADDING, ty + TOOLTIP_PADDING + LINE_HEIGHT);
+                        
                         ctx.strokeStyle = "rgba(255, 255, 255, 0.1)";
                         ctx.beginPath();
-                        let sepY = ty + 8 + lineH * 2 + 2;
-                        ctx.moveTo(tx + 10, sepY);
-                        ctx.lineTo(tx + tooltipW - 10, sepY);
+                        let sepY = ty + TOOLTIP_PADDING + (LINE_HEIGHT * 2) + 4;
+                        ctx.moveTo(tx + TOOLTIP_PADDING, sepY);
+                        ctx.lineTo(tx + tooltipW - TOOLTIP_PADDING, sepY);
                         ctx.stroke();
                         
-                        // Title lines
                         ctx.fillStyle = "#FFFFFF";
-                        ctx.font = "12px sans-serif";
+                        ctx.font = BODY_FONT;
                         for (let li = 0; li < titleLines.length; li++) {
-                            ctx.fillText(titleLines[li], tx + 10, sepY + 6 + li * lineH);
+                            ctx.fillText(titleLines[li], tx + TOOLTIP_PADDING, sepY + 8 + (li * LINE_HEIGHT));
                         }
                     }
                     
