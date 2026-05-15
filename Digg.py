@@ -77,7 +77,7 @@ BG_CONFIG = {
 }
 
 # --- Page Config ---
-st.set_page_config(page_title="My Local Digg", page_icon="📈", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="My Local Digg", page_icon="📈", layout="wide", initial_sidebar_state="auto")
 
 # --- Custom CSS for aesthetic (Global Consistently) ---
 st.markdown("""
@@ -287,6 +287,61 @@ st.markdown("""
     .stButton > button:hover {
         color: #FFF !important;
         transform: scale(1.2);
+    }
+
+    /* =========================================
+       6. MOBILE OPTIMIZATIONS (@media queries)
+       ========================================= */
+    @media (max-width: 768px) {
+        /* ลดระยะห่างขอบจอให้เนื้อหาเต็มขึ้น */
+        .main .block-container {
+            padding-left: 1rem !important;
+            padding-right: 1rem !important;
+            padding-top: 2rem !important;
+        }
+
+        /* ปรับหน้าตา Card ข่าวให้เหมาะกับจอแนวตั้ง */
+        .news-card {
+            padding: 14px !important;
+            margin-bottom: 12px !important;
+            flex-direction: column !important;
+            align-items: flex-start !important;
+            gap: 12px !important;
+        }
+
+        .news-content {
+            width: 100% !important;
+        }
+
+        /* ปรับปุ่มโหวตให้อยู่ในแถวเดียวกันด้านล่าง */
+        .vote-controls {
+            display: flex !important;
+            flex-direction: row !important;
+            align-items: center !important;
+            justify-content: flex-start !important;
+            gap: 20px !important;
+            width: 100% !important;
+            border-top: 1px solid rgba(255,255,255,0.05) !important;
+            padding-top: 10px !important;
+        }
+
+        .score-box {
+            font-size: 18px !important;
+        }
+
+        /* ปรับขนาดหัวข้อข่าว */
+        .news-title {
+            font-size: 16px !important;
+            line-height: 1.4 !important;
+        }
+
+        /* ปรับปุ่ม Toggle Sidebar ให้เล็กลงนิดนึงบนมือถือ */
+        [data-testid="collapsedControl"] {
+            width: 40px !important;
+            height: 40px !important;
+            top: 10px !important;
+            left: 10px !important;
+        }
     }
     </style>
 """, unsafe_allow_html=True)
