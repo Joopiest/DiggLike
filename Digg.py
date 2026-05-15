@@ -1327,12 +1327,12 @@ else:
                         ctx.restore();
                         
                         // Text Rendering
-                        ctx.fillStyle = "white";
-                        ctx.font = "bold 12px sans-serif";
+                        ctx.fillStyle = "#FFFFFF";
+                        ctx.font = "800 14px 'Inter', 'Sarabun', sans-serif";
                         ctx.textBaseline = "middle";
                         ctx.textAlign = "center";
                         
-                        let maxChars = Math.max(2, Math.floor(this.width / 8));
+                        let maxChars = Math.max(2, Math.floor(this.width / 9.5));
                         let title = this.data.title;
                         if(title.length > maxChars) {
                             title = title.substring(0, maxChars) + "..";
@@ -1350,17 +1350,17 @@ else:
                         let scoreVal = this.data.base_score || this.data.score || 100;
                         if (this.height > 60) {
                             // Draw title a bit higher
-                            ctx.font = "bold 12px sans-serif";
+                            ctx.font = "800 14px 'Inter', 'Sarabun', sans-serif";
                             ctx.fillText(title, this.x + this.width/2, drawY + this.height/2 - 10);
                             
                             // Draw score and time below
-                            ctx.font = "bold 10px sans-serif";
-                            ctx.fillStyle = "rgba(255, 255, 255, 0.8)";
+                            ctx.font = "bold 11px 'Inter', sans-serif";
+                            ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
                             let timeStr = this.data.fetch_time || "--:--";
                             ctx.fillText("🔥 " + scoreVal.toLocaleString() + "  |  🕒 " + timeStr, this.x + this.width/2, drawY + this.height/2 + 10);
                         } else {
                             // Draw title centered
-                            ctx.font = "bold 12px sans-serif";
+                            ctx.font = "800 13px 'Inter', 'Sarabun', sans-serif";
                             ctx.fillText(title, this.x + this.width/2, drawY + this.height/2);
                         }
                         
