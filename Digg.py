@@ -79,81 +79,214 @@ BG_CONFIG = {
 # --- Page Config ---
 st.set_page_config(page_title="My Local Digg", page_icon="📈", layout="wide", initial_sidebar_state="expanded")
 
-# --- Custom CSS for aesthetic ---
+# --- Custom CSS for aesthetic (Global Consistently) ---
 st.markdown("""
     <style>
-    /* Import Premium Fonts */
+    /* 1. Base Styles & Typography */
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Sarabun:wght@300;400;700&display=swap');
-
-    html, body, [data-testid="stAppViewContainer"] {
+    
+    html, body, [data-testid="stAppViewContainer"], .stApp, p, div, h1, h2, h3, span {
         font-family: 'Inter', 'Sarabun', sans-serif !important;
+    }
+    [data-testid="stAppViewContainer"] {
         background-color: #0F172A !important; /* Deeper Dark Blue */
     }
 
-    .post-container {
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        border-radius: 16px;
-        padding: 20px;
-        margin-bottom: 20px;
-        background: rgba(255, 255, 255, 0.03);
-        backdrop-filter: blur(12px);
-        -webkit-backdrop-filter: blur(12px);
-        display: flex;
-        flex-direction: row;
-        align-items: flex-start;
-        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    /* =========================================
+       2. THE PERFECT SIDEBAR TOGGLE FIX 
+       ========================================= */
+
+    /* 2.1 ซ่อน SVG เดิมของ Streamlit ถาวร */
+    [data-testid="stSidebarCollapseButton"] svg,
+    [data-testid="collapsedControl"] svg {
+        display: none !important;
     }
-    .post-container:hover {
-        background: rgba(255, 255, 255, 0.06);
-        border-color: rgba(255, 255, 255, 0.2);
-        transform: translateY(-4px);
-        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+
+    /* 2.2 ปุ่ม "ซ่อน" (แสดงอยู่ข้างในตอนกาง Sidebar) */
+    [data-testid="stSidebarCollapseButton"] {
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        background-color: #1E293B !important;
+        border: 2px solid #FFFFFF !important;
+        border-radius: 50% !important;
+        min-width: 46px !important;
+        min-height: 46px !important;
+        position: relative !important;
+        transition: all 0.3s ease !important;
+        cursor: pointer !important;
+    }
+
+    /* 2.3 ปุ่ม "แสดง" (Wrapper ตัวนอกที่ซ่อนอยู่)
+       **แก้จุดบอด:** บังคับโชว์ 100% และห้ามเลื่อนตกจอ แต่ไม่ฝืน display */
+    [data-testid="collapsedControl"] {
+        opacity: 1 !important;           /* สู้กับ Streamlit ที่ชอบ Fade เป็น 0 */
+        transform: none !important;      /* สู้กับ Streamlit ที่ชอบดึงปุ่มตกขอบจอ */
+        background-color: #FF4500 !important; /* สีส้มแดง */
+        border: 2px solid #FFFFFF !important;
+        border-radius: 50% !important;
+        width: 46px !important;
+        height: 46px !important;
+        position: fixed !important;
+        top: 15px !important;
+        left: 15px !important;
+        z-index: 999999 !important;
+        box-shadow: 0 0 20px rgba(255, 69, 0, 0.5) !important;
+        transition: all 0.3s ease !important;
+        cursor: pointer !important;
+    }
+
+    /* ล้างค่าปุ่มใสๆ ที่ Streamlit ยัดไว้ข้างใน เพื่อไม่ให้บล็อกการคลิก */
+    [data-testid="collapsedControl"] button {
+        background: transparent !important;
+        border: none !important;
+        width: 100% !important;
+        height: 100% !important;
+    }
+
+    /* 2.4 ลูกศร "ซ่อน" (ชี้ซ้าย) */
+    [data-testid="stSidebarCollapseButton"]::after {
+        content: "«" !important;
+        position: absolute !important;
+        color: #FFFFFF !important;
+        font-size: 28px !important;
+        font-weight: 900 !important;
+        font-family: sans-serif !important;
+        top: 50% !important;
+        left: 50% !important;
+        transform: translate(-50%, -50%) !important;
+        pointer-events: none !important;
+    }
+
+    /* 2.5 ลูกศร "แสดง" (ชี้ขวา) */
+    [data-testid="collapsedControl"]::after {
+        content: "»" !important;
+        position: absolute !important;
+        color: #FFFFFF !important;
+        font-size: 28px !important;
+        font-weight: 900 !important;
+        font-family: sans-serif !important;
+        top: 50% !important;
+        left: 50% !important;
+        transform: translate(-50%, -50%) !important;
+        pointer-events: none !important;
+    }
+
+    /* 2.6 Hover Effects */
+    [data-testid="stSidebarCollapseButton"]:hover,
+    [data-testid="collapsedControl"]:hover {
+        background-color: #3B82F6 !important; /* เปลี่ยนเป็นสีฟ้าเมื่อชี้ */
+        border-color: #FFFFFF !important;
+        transform: scale(1.15) !important;
+        box-shadow: 0 0 15px rgba(59, 130, 246, 0.9) !important;
+    }
+
+    /* 3. Top-Right Menu Fix (Targeting ONLY the App Menu) */
+    /* Use very specific aria-label to avoid sidebar conflict */
+    button[aria-label*="menu"],
+    button[aria-label*="Menu"],
+    button[aria-label*="App menu"] {
+        position: relative !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        min-width: 40px !important;
+    }
+    
+    button[aria-label*="menu"] span,
+    button[aria-label*="App menu"] span { display: none !important; }
+    
+    button[aria-label*="menu"]::after,
+    button[aria-label*="App menu"]::after {
+        content: "⋮" !important; /* 3 Dots Icon */
+        font-size: 24px !important;
+        color: #F8FAFC !important;
+        position: absolute !important;
+        display: block !important;
+        visibility: visible !important;
+        top: 50% !important;
+        left: 50% !important;
+        transform: translate(-50%, -50%) !important;
+    }
+
+    [data-testid="stExpanderIcon"], [data-testid="stIconMaterial"] { display: none !important; }
+    [data-testid="stExpander"] summary {
+        display: flex !important;
+        align-items: center !important;
+        justify-content: space-between !important;
+    }
+    [data-testid="stExpander"] summary::after {
+        content: "▼";
+        font-size: 12px;
+        color: #F8FAFC;
+        margin-left: auto;
+        transition: transform 0.3s ease;
+    }
+    [data-testid="stExpander"][open] summary::after { transform: rotate(180deg); }
+    [data-testid="stExpander"] summary p {
+        padding-left: 10px;
+        font-size: 16px !important;
+        font-weight: 700 !important;
+        color: #F8FAFC !important;
+        margin: 0 !important;
+    }
+    [data-testid="stExpander"] {
+        border: 1px solid rgba(255, 255, 255, 0.1) !important;
+        border-radius: 12px !important;
+        background: rgba(255, 255, 255, 0.05) !important;
+        margin-bottom: 1rem !important;
+    }
+
+    /* 4. Radio Navigation Bar */
+    [data-testid="stRadio"] > div { flex-wrap: wrap !important; gap: 8px 12px !important; }
+    [data-testid="stRadio"] > div > label {
+        font-size: 14px !important;
+        padding: 8px 16px !important;
+        background: rgba(255, 255, 255, 0.05) !important;
+        border: 1px solid rgba(255, 255, 255, 0.1) !important;
+        border-radius: 50px !important;
+        transition: all 0.2s ease !important;
+    }
+    [data-testid="stRadio"] > div > label:hover { background: rgba(255, 255, 255, 0.1) !important; }
+
+    /* 5. News Card Aesthetic */
+    .news-card {
+        background: rgba(255, 255, 255, 0.03);
+        backdrop-filter: blur(8px);
+        border-radius: 16px;
+        padding: 18px;
+        margin-bottom: 15px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+    }
+    .news-card:hover {
+        background: rgba(255, 255, 255, 0.07);
+        transform: scale(1.02) translateY(-4px);
+        border-color: rgba(66, 133, 244, 0.3);
     }
     .score-box {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        width: 80px;
-        margin-right: 20px;
-        background: rgba(255, 255, 255, 0.05);
-        border-radius: 12px;
-        padding: 10px;
-    }
-    .score-number {
-        font-size: 26px;
-        font-weight: 800;
+        font-size: 22px;
+        font-weight: 900;
+        text-align: center;
         background: linear-gradient(135deg, #FF6B35, #FF4500);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
-        margin: 5px 0;
     }
-    .post-content {
-        flex-grow: 1;
+    
+    .stButton > button {
+        border: none !important;
+        background: transparent !important;
+        font-size: 24px !important;
+        padding: 0 !important;
+        color: rgba(255, 255, 255, 0.4) !important;
+        transition: all 0.2s ease !important;
     }
-    .post-title {
-        font-size: 20px;
-        font-weight: 700;
-        color: #F8FAFC;
-        text-decoration: none;
-        line-height: 1.4;
-    }
-    .post-source {
-        font-size: 14px;
-        color: #94A3B8;
-        margin-top: 8px;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-    }
-    .tag {
-        background: rgba(255, 255, 255, 0.1);
-        padding: 4px 12px;
-        border-radius: 20px;
-        font-size: 12px;
-        color: #CBD5E1;
-        font-weight: 600;
-        border: 1px solid rgba(255, 255, 255, 0.05);
+    .stButton > button:hover {
+        color: #FFF !important;
+        transform: scale(1.2);
     }
     </style>
 """, unsafe_allow_html=True)
@@ -814,224 +947,7 @@ st.sidebar.markdown("<div style='text-align: center; color: #bbb; font-size: 15p
 
 # --- Main Feed ---
 
-st.markdown("""
-<style>
-    /* Import Premium Fonts */
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Sarabun:wght@300;400;700&display=swap');
-    
-    body, .stApp, p, div, h1, h2, h3, span {
-        font-family: 'Inter', 'Sarabun', sans-serif !important;
-    }
-    
-    /* Navigation bar: neat multi-row with spacing */
-    [data-testid="stRadio"] > div {
-        flex-wrap: wrap !important;
-        gap: 8px 12px !important;
-    }
-    [data-testid="stRadio"] > div > label {
-        font-size: 14px !important;
-        padding: 8px 16px !important;
-        background: rgba(255, 255, 255, 0.05) !important;
-        border: 1px solid rgba(255, 255, 255, 0.1) !important;
-        border-radius: 50px !important;
-        transition: all 0.2s ease !important;
-    }
-    [data-testid="stRadio"] > div > label:hover {
-        background: rgba(255, 255, 255, 0.1) !important;
-    }
-    
-    .news-card {
-        background: rgba(255, 255, 255, 0.03);
-        backdrop-filter: blur(8px);
-        border-radius: 16px;
-        padding: 18px;
-        margin-bottom: 15px;
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-    }
-    .news-card:hover {
-        background: rgba(255, 255, 255, 0.07);
-        transform: scale(1.02) translateY(-4px);
-        border-color: rgba(66, 133, 244, 0.3);
-        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.2), 0 10px 10px -5px rgba(0, 0, 0, 0.1);
-    }
-    .source-badge {
-        display: inline-block;
-        padding: 4px 12px;
-        border-radius: 8px;
-        font-size: 11px;
-        font-weight: 800;
-        letter-spacing: 0.05em;
-        text-transform: uppercase;
-        margin-right: 12px;
-        color: white;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-    }
-    .category-badge {
-        display: inline-block;
-        padding: 4px 12px;
-        border-radius: 8px;
-        font-size: 11px;
-        background: rgba(255, 255, 255, 0.12);
-        color: #94A3B8;
-        font-weight: 700;
-        text-transform: uppercase;
-    }
-    .news-title {
-        font-size: 17px;
-        font-weight: 600;
-        color: #F8FAFC;
-        text-decoration: none;
-        display: block;
-        margin-top: 10px;
-        line-height: 1.5;
-        transition: color 0.2s ease;
-    }
-    .news-title:hover {
-        color: #60A5FA !important;
-    }
-    .score-box {
-        font-size: 22px;
-        font-weight: 900;
-        text-align: center;
-        min-width: 50px;
-        background: linear-gradient(135deg, #FF6B35, #FF4500);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-    }
-    /* Hide default Streamlit button borders for a cleaner look */
-    .stButton > button {
-        border: none !important;
-        background: transparent !important;
-        font-size: 24px !important;
-        padding: 0 !important;
-        color: rgba(255, 255, 255, 0.4) !important;
-        height: auto !important;
-        line-height: 1 !important;
-        transition: all 0.2s ease !important;
-    }
-    .stButton > button:hover {
-        color: #FFF !important;
-        transform: scale(1.2);
-        background: transparent !important;
-    }
-    
-    /* --- Global Fix for Broken Icons (Sidebar, Menu, and Expanders) --- */
-    
-    /* 1. Fix Sidebar Toggle Icon Visibility, Overlap, and Interactivity */
-    [data-testid="stSidebarCollapseButton"] {
-        display: flex !important;
-        align-items: center !important;
-        justify-content: center !important;
-        position: relative !important;
-        background-color: #1E293B !important; /* Dark Slate background for contrast */
-        border: 1px solid rgba(255, 255, 255, 0.2) !important;
-        border-radius: 50% !important;
-        min-width: 40px !important;
-        min-height: 40px !important;
-        z-index: 999999 !important; /* Ensure it's above everything */
-        cursor: pointer !important;
-        pointer-events: auto !important; /* Force interactivity */
-        visibility: visible !important; /* Force visibility */
-        opacity: 1 !important;
-        color: transparent !important; /* Hide default text */
-        transition: all 0.2s ease !important;
-    }
-
-    /* Hide ALL internal elements and default pseudo-elements strictly to prevent overlap */
-    [data-testid="stSidebarCollapseButton"] *,
-    [data-testid="stSidebarCollapseButton"]::before {
-        display: none !important;
-        visibility: hidden !important;
-        content: none !important;
-        opacity: 0 !important;
-    }
-
-    /* Create the new clean Menu Icon */
-    [data-testid="stSidebarCollapseButton"]::after {
-        content: "☰" !important;
-        font-size: 24px !important;
-        color: #FFFFFF !important;
-        position: absolute !important;
-        display: block !important;
-        visibility: visible !important;
-        line-height: 1 !important;
-        top: 50% !important;
-        left: 50% !important;
-        transform: translate(-50%, -50%) !important;
-        pointer-events: none !important; /* Clicks pass through to the button */
-    }
-
-    /* Hover state for better visibility and feedback */
-    [data-testid="stSidebarCollapseButton"]:hover {
-        background-color: rgba(255, 255, 255, 0.4) !important;
-        border-color: #FFFFFF !important;
-        transform: scale(1.1) !important;
-        box-shadow: 0 0 15px rgba(255, 255, 255, 0.2) !important;
-    }
-
-    /* 2. Fix Top-Right Menu Icon */
-    [data-testid="stBaseButton-headerNoPadding"] {
-        position: relative !important;
-        display: flex !important;
-        align-items: center !important;
-        justify-content: center !important;
-        min-width: 40px !important;
-    }
-    [data-testid="stBaseButton-headerNoPadding"] span {
-        display: none !important;
-    }
-    [data-testid="stBaseButton-headerNoPadding"]::after {
-        content: "⋮" !important; /* Vertical Ellipsis */
-        font-size: 24px !important;
-        color: #F8FAFC !important;
-        position: absolute !important;
-        display: block !important;
-        line-height: 1 !important;
-        visibility: visible !important;
-    }
-
-    /* 3. Fix Expander Chevron and Label for Dark Themes */
-    [data-testid="stExpanderIcon"], 
-    [data-testid="stIconMaterial"] {
-        display: none !important;
-    }
-    [data-testid="stExpander"] summary {
-        display: flex !important;
-        align-items: center !important;
-        justify-content: space-between !important;
-    }
-    [data-testid="stExpander"] summary::after {
-        content: "▼";
-        font-size: 12px;
-        color: #F8FAFC;
-        margin-left: auto;
-        transition: transform 0.3s ease;
-    }
-    [data-testid="stExpander"][open] summary::after {
-        transform: rotate(180deg);
-    }
-
-    [data-testid="stExpander"] summary p {
-        padding-left: 10px;
-        font-size: 16px !important;
-        font-weight: 700 !important;
-        color: #F8FAFC !important;
-        margin: 0 !important;
-    }
-    [data-testid="stExpander"] {
-        border: 1px solid rgba(255, 255, 255, 0.1) !important;
-        border-radius: 12px !important;
-        background: rgba(255, 255, 255, 0.05) !important;
-        margin-bottom: 1rem !important;
-    }
-</style>
-</style>
-""", unsafe_allow_html=True)
+# News Items Rendering logic continues below...
 
 if not st.session_state.fetched_items:
     st.info("Feed is empty. Click 'Refresh Feed' in the sidebar to load the latest trends!")
