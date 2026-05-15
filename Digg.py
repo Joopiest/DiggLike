@@ -77,7 +77,7 @@ BG_CONFIG = {
 }
 
 # --- Page Config ---
-st.set_page_config(page_title="My Local Digg", page_icon="📈", layout="wide")
+st.set_page_config(page_title="My Local Digg", page_icon="📈", layout="wide", initial_sidebar_state="expanded")
 
 # --- Custom CSS for aesthetic ---
 st.markdown("""
@@ -920,23 +920,114 @@ st.markdown("""
         background: transparent !important;
     }
     
-    /* Fix Expander Header Overlap (Material Icon Ligature Issue) */
-    [data-testid="stExpander"] [data-testid="stExpanderIcon"],
-    [data-testid="stExpander"] [data-testid="stIconMaterial"] {
+    /* --- Global Fix for Broken Icons (Sidebar, Menu, and Expanders) --- */
+    
+    /* 1. Fix Sidebar Toggle Icon Visibility, Overlap, and Interactivity */
+    [data-testid="stSidebarCollapseButton"] {
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        position: relative !important;
+        background-color: #1E293B !important; /* Dark Slate background for contrast */
+        border: 1px solid rgba(255, 255, 255, 0.2) !important;
+        border-radius: 50% !important;
+        min-width: 40px !important;
+        min-height: 40px !important;
+        z-index: 999999 !important; /* Ensure it's above everything */
+        cursor: pointer !important;
+        pointer-events: auto !important; /* Force interactivity */
+        visibility: visible !important; /* Force visibility */
+        opacity: 1 !important;
+        color: transparent !important; /* Hide default text */
+        transition: all 0.2s ease !important;
+    }
+
+    /* Hide ALL internal elements and default pseudo-elements strictly to prevent overlap */
+    [data-testid="stSidebarCollapseButton"] *,
+    [data-testid="stSidebarCollapseButton"]::before {
+        display: none !important;
+        visibility: hidden !important;
+        content: none !important;
+        opacity: 0 !important;
+    }
+
+    /* Create the new clean Menu Icon */
+    [data-testid="stSidebarCollapseButton"]::after {
+        content: "☰" !important;
+        font-size: 24px !important;
+        color: #FFFFFF !important;
+        position: absolute !important;
+        display: block !important;
+        visibility: visible !important;
+        line-height: 1 !important;
+        top: 50% !important;
+        left: 50% !important;
+        transform: translate(-50%, -50%) !important;
+        pointer-events: none !important; /* Clicks pass through to the button */
+    }
+
+    /* Hover state for better visibility and feedback */
+    [data-testid="stSidebarCollapseButton"]:hover {
+        background-color: rgba(255, 255, 255, 0.4) !important;
+        border-color: #FFFFFF !important;
+        transform: scale(1.1) !important;
+        box-shadow: 0 0 15px rgba(255, 255, 255, 0.2) !important;
+    }
+
+    /* 2. Fix Top-Right Menu Icon */
+    [data-testid="stBaseButton-headerNoPadding"] {
+        position: relative !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        min-width: 40px !important;
+    }
+    [data-testid="stBaseButton-headerNoPadding"] span {
         display: none !important;
     }
+    [data-testid="stBaseButton-headerNoPadding"]::after {
+        content: "⋮" !important; /* Vertical Ellipsis */
+        font-size: 24px !important;
+        color: #F8FAFC !important;
+        position: absolute !important;
+        display: block !important;
+        line-height: 1 !important;
+        visibility: visible !important;
+    }
+
+    /* 3. Fix Expander Chevron and Label for Dark Themes */
+    [data-testid="stExpanderIcon"], 
+    [data-testid="stIconMaterial"] {
+        display: none !important;
+    }
+    [data-testid="stExpander"] summary {
+        display: flex !important;
+        align-items: center !important;
+        justify-content: space-between !important;
+    }
+    [data-testid="stExpander"] summary::after {
+        content: "▼";
+        font-size: 12px;
+        color: #F8FAFC;
+        margin-left: auto;
+        transition: transform 0.3s ease;
+    }
+    [data-testid="stExpander"][open] summary::after {
+        transform: rotate(180deg);
+    }
+
     [data-testid="stExpander"] summary p {
         padding-left: 10px;
         font-size: 16px !important;
         font-weight: 700 !important;
         color: #F8FAFC !important;
-        display: block !important;
-        visibility: visible !important;
+        margin: 0 !important;
     }
     [data-testid="stExpander"] {
         border: 1px solid rgba(255, 255, 255, 0.1) !important;
         border-radius: 12px !important;
-        background: rgba(255, 255, 255, 0.02) !important;
+        background: rgba(255, 255, 255, 0.05) !important;
+        margin-bottom: 1rem !important;
     }
 </style>
 </style>
