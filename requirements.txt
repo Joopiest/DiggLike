@@ -3,6 +3,6 @@ requests
 feedparser
 beautifulsoup4
 firebase-admin
+pythainlp
 wordcloud
 matplotlib
-pythainlp
