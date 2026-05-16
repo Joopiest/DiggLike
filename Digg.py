@@ -964,6 +964,10 @@ if monitored_input != st.session_state.get('monitored_keywords', ""):
 # Improved splitting: handle commas and newlines (allow spaces within phrases)
 monitored_words = [w.strip().lower() for w in monitored_input.replace("\n", ",").split(",") if w.strip()]
 
+# Assign unique colors to each keyword
+MATCH_PALETTE = ["#FFD700", "#00FFFF", "#39FF14", "#FF00FF", "#FFA500", "#FF3131", "#1F51FF", "#F0E68C"]
+kw_colors = {word: MATCH_PALETTE[i % len(MATCH_PALETTE)] for i, word in enumerate(monitored_words)}
+
 # User feedback in sidebar
 if monitored_words:
     # Count matches across ALL fetched items
@@ -1175,9 +1179,12 @@ else:
         is_monitored = False
         title_lower = item['title'].lower()
         matched_word = ""
+        match_color = "#FFD700" # Default
         for word in monitored_words:
             if check_keyword_match(word, title_lower):
-                is_monitored, matched_word = True, word.upper(); break
+                is_monitored, matched_word = True, word.upper()
+                match_color = kw_colors.get(word, "#FFD700")
+                break
         
         col_vote, col_content = st.columns([2.5, 7.5])
         with col_vote:
@@ -1205,8 +1212,9 @@ else:
             bg_color = source_colors.get(item['source'], "#444")
             # --- SUPER PROMINENT BLINKING HIGHLIGHT ---
             card_class = "news-card monitored-card" if is_monitored else "news-card"
-            card_style = "border: 3px solid #FFD700;" if is_monitored else ""
-            match_badge = f'<span style="background-color: #FFD700; color: #000; padding: 2px 8px; border-radius: 4px; font-weight: 900; font-size: 11px; margin-right: 8px; box-shadow: 0 0 15px #FFD700; animation: match-pulse 1s infinite;">🎯 MATCH: {matched_word}</span>' if is_monitored else ""
+            # Use specific match color for border and glow
+            card_style = f"border: 3px solid {match_color}; box-shadow: 0 0 15px {match_color}44;" if is_monitored else ""
+            match_badge = f'<span style="background-color: {match_color}; color: #000; padding: 2px 8px; border-radius: 4px; font-weight: 900; font-size: 11px; margin-right: 8px; box-shadow: 0 0 15px {match_color}; animation: match-pulse 1s infinite;">🎯 MATCH: {matched_word}</span>' if is_monitored else ""
             
             st.markdown(f"""
                 <div class="{card_class}" style="{card_style}">
@@ -1214,7 +1222,7 @@ else:
                         <span class="source-badge" style="background-color: {bg_color};">{item['source']}</span>
                         <span class="category-badge">{item['category']}</span>
                         {match_badge}
-                        <a class="news-title" href="{item['url']}" target="_blank" style="color: {'#FFD700' if is_monitored else 'white'} !important; font-weight: {'900' if is_monitored else 'normal'};">{item['title']}</a>
+                        <a class="news-title" href="{item['url']}" target="_blank" style="color: {match_color if is_monitored else 'white'} !important; font-weight: {'900' if is_monitored else 'normal'};">{item['title']}</a>
                     </div>
                 </div>
             """, unsafe_allow_html=True)
@@ -1262,8 +1270,15 @@ else:
     elif active_tab == "📊 Digg Stack":
         stack_data = []
         for item in sorted_items:
-            # Check monitoring state for each item in the stack
-            is_m = any(check_keyword_match(w, item['title'].lower()) for w in monitored_words)
+            # Check monitoring state and color for each item in the stack
+            is_m = False
+            m_color = "#FFD700"
+            for word in monitored_words:
+                if check_keyword_match(word, item['title'].lower()):
+                    is_m = True
+                    m_color = kw_colors.get(word, "#FFD700")
+                    break
+            
             stack_data.append({
                 "id": item['id'], 
                 "title": item['title'], 
@@ -1271,9 +1286,12 @@ else:
                 "score": get_total_score(item), 
                 "url": item['url'], 
                 "source": item['source'],
-                "is_monitored": is_m
+                "is_monitored": is_m,
+                "match_color": m_color
             })
-        js_data = json.dumps(stack_data)
+        
+        # Limit to top 150 items for smooth 60fps animation
+        js_data = json.dumps(stack_data[:150])
         html_code = """
         <!-- FORCE RELOAD V3 -->
         <!DOCTYPE html>
@@ -1389,12 +1407,13 @@ else:
                         ctx.fillStyle = this.color;
                         ctx.globalAlpha = 0.85;
                         
-                        // --- HIGHLIGHT MONITORED BLOCKS (BLINKING/PULSING) ---
+                        // --- HIGHLIGHT MONITORED BLOCKS (BLINKING/PULSING WITH UNIQUE COLOR) ---
                         if (this.data.is_monitored) {
+                            let mColor = this.data.match_color || "#FFD700";
                             let pulse = 15 + Math.sin(Date.now() / 200) * 10; // Dynamic blur
-                            ctx.shadowColor = "#FFD700";
+                            ctx.shadowColor = mColor;
                             ctx.shadowBlur = pulse;
-                            ctx.strokeStyle = `rgba(255, 215, 0, ${0.5 + Math.sin(Date.now() / 200) * 0.5})`; // Pulsing border alpha
+                            ctx.strokeStyle = mColor; // Keep border color stable but glow pulses
                             ctx.lineWidth = 5;
                             ctx.globalAlpha = 1.0;
                         }
