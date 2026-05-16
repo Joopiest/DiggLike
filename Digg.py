@@ -102,12 +102,19 @@ try:
 except:
     db = None
 
+import hashlib
+
+def get_db_id(item_id):
+    """Returns a Firebase-safe field name by hashing the item_id."""
+    return hashlib.md5(item_id.encode()).hexdigest()
+
 def update_global_vote(item_id, old_vote, new_vote):
-    diff = (new_vote - old_vote) * 5000
+    diff = (new_vote - old_vote) * 100
     if diff != 0 and db:
         try:
+            db_id = get_db_id(item_id)
             doc_ref = db.collection('app_state').document('global_votes')
-            doc_ref.set({item_id: firestore.Increment(diff)}, merge=True)
+            doc_ref.set({db_id: firestore.Increment(diff)}, merge=True)
         except Exception as e:
             st.error(f"Error updating global vote: {e}")
 
@@ -120,6 +127,7 @@ def get_cached_global_votes():
             doc_ref = db.collection('app_state').document('global_votes')
             doc = doc_ref.get()
             if doc.exists:
+                # Raw votes are stored by hashed ID
                 votes = doc.to_dict()
         except:
             pass
@@ -406,6 +414,30 @@ st.markdown("""
             top: 10px !important;
             left: 10px !important;
         }
+    /* 7. Masonry & Sticky Layout */
+    .masonry-container {
+        column-count: 3;
+        column-gap: 15px;
+        width: 100%;
+    }
+    .masonry-item {
+        break-inside: avoid;
+        margin-bottom: 15px;
+        display: block;
+    }
+    
+    @media (max-width: 1200px) { .masonry-container { column-count: 2; } }
+    @media (max-width: 600px) { .masonry-container { column-count: 1; } }
+
+    .sticky-nav {
+        position: sticky;
+        top: 0;
+        z-index: 999;
+        background: rgba(15, 23, 42, 0.9);
+        backdrop-filter: blur(10px);
+        padding: 10px 0;
+        margin-bottom: 20px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
     }
     </style>
 """, unsafe_allow_html=True)
@@ -1136,7 +1168,9 @@ if not st.session_state.get('fetched_items'):
         st.info("🚀 Feed is empty. Click '▶ START' in the sidebar to load trending news!")
 else:
     def get_total_score(item):
-        return item['base_score'] + global_votes.get(item['id'], 0)
+        db_id = get_db_id(item['id'])
+        local_vote_boost = st.session_state.user_votes.get(item['id'], 0) * 100
+        return item['base_score'] + global_votes.get(db_id, 0) + local_vote_boost
 
     SOURCE_MAPPING = {
         "Reuters (World News)": "Reuters", "Associated Press (AP)": "AP News", "The Information (Tech)": "The Information",
@@ -1214,10 +1248,13 @@ else:
             for i, (w, c) in enumerate(row):
                 cols[i].button(f"{w} ({c})", key=f"wc_{r_idx}_{i}", on_click=select_word_callback, args=(w,), use_container_width=True)
 
+    # Wrap navigation in a sticky div
+    st.markdown('<div class="sticky-nav">', unsafe_allow_html=True)
     tab_cols = st.columns(len(tab_options))
     for idx, opt in enumerate(tab_options):
         if tab_cols[idx].button(opt, key=f"nav_{idx}", type="primary" if active_tab == opt else "secondary", use_container_width=True):
             st.session_state.active_tab = opt; st.rerun()
+    st.markdown('</div>', unsafe_allow_html=True)
 
     if active_tab == "All Feed":
         cols = st.columns(3)
@@ -1227,8 +1264,6 @@ else:
         # Use ALL fetched items for Watchlist, ignoring source/search filters
         all_fetched = st.session_state.get('fetched_items', [])
         watch_items = [item for item in all_fetched if item.get('is_monitored', False)]
-        
-        # Sort by total score
         watch_items = sorted(watch_items, key=get_total_score, reverse=True)
         
         if not watch_items: st.info("No items match your watchlist keywords.")
@@ -1307,7 +1342,41 @@ else:
                 let blocks = [];
                 let queue = [];
                 let columnHeights = [];
+                let particles = []; // Particle system array
                 let initialized = false;
+                
+                class Particle {
+                    constructor(x, y, color) {
+                        this.x = x;
+                        this.y = y;
+                        this.color = color;
+                        this.vx = (Math.random() - 0.5) * 6;
+                        this.vy = (Math.random() - 1) * 8;
+                        this.life = 1.0;
+                        this.decay = 0.02 + Math.random() * 0.02;
+                        this.size = 2 + Math.random() * 3;
+                    }
+                    update() {
+                        this.x += this.vx;
+                        this.y += this.vy;
+                        this.vy += 0.2; // Gravity
+                        this.life -= this.decay;
+                    }
+                    draw() {
+                        ctx.fillStyle = this.color;
+                        ctx.globalAlpha = this.life;
+                        ctx.beginPath();
+                        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                        ctx.fill();
+                        ctx.globalAlpha = 1.0;
+                    }
+                }
+
+                function spawnSparks(x, y, color, count = 10) {
+                    for (let i = 0; i < count; i++) {
+                        particles.push(new Particle(x, y, color));
+                    }
+                }
                 
                 // Camera variables (Independent per column)
                 let cameraY = [];
@@ -1327,7 +1396,7 @@ else:
                         this.color = COLORS[this.source] || "#95a5a6";
                         
                         let score = data.base_score || data.score || 100;
-                        this.height = Math.max(25, Math.min(150, 25 + Math.floor(score / 10)));
+                        this.height = Math.max(35, Math.min(200, 35 + Math.floor(score / 5)));
                         this.width = colWidth - 10;
                         
                         // Start off screen (above camera for its specific column)
@@ -1347,14 +1416,15 @@ else:
                             if (this.y >= this.targetY) {
                                 this.y = this.targetY;
                                 this.stopped = true;
+                                // IMPACT! Spawn sparks
+                                spawnSparks(this.x + this.width / 2, this.y + this.height, this.color, 15);
                             }
                         }
-                    }
-                    
-                    draw() {
+                        }
+
+                        draw() {
                         let currentCamY = cameraY[this.col] || 0;
                         let drawY = this.y + currentCamY;
-                        
                         if (drawY + this.height < 0 || drawY > canvas.height) return; // Culling
 
                         // 1. Shadow & Glass Glow
@@ -1743,6 +1813,10 @@ else:
         components.html(processed_html, height=600)
     else:
         cat_items = [item for item in sorted_items if item['category'] == active_tab]
-        cols = st.columns(3)
-        for idx, item in enumerate(cat_items):
-            with cols[idx % 3]: render_item(item, f"cat_{idx}")
+        if not cat_items:
+            st.info(f"No news found in the {active_tab} category matching your filters.")
+        else:
+            cols = st.columns(3)
+            for idx, item in enumerate(cat_items):
+                with cols[idx % 3]: render_item(item, f"cat_{idx}")
+
