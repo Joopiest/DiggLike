@@ -25,6 +25,51 @@ except ImportError:
     word_tokenize = lambda x: x.split()
     thai_stopwords = lambda: set()
 
+# --- Global Thread Synchronization ---
+STATE_LOCK = threading.Lock()
+# Shared state accessible across threads without Disk I/O
+GLOBAL_STATE = {
+    "last_fetch_time": 0,
+    "running": False,
+    "latest_items": []
+}
+
+# --- Pre-compiled Keywords for Categorization ---
+CATEGORIES_KEYWORDS = {
+    "Breaking": {
+        "en": [re.compile(rf"\b{w}\b", re.I) for w in ['breaking', 'urgent', 'alert', 'crisis', 'latest', 'just in', 'live']],
+        "th": ['ด่วน', 'ข่าวด่วน', 'อัปเดต', 'ประกาศสำคัญ', 'เกาะติด']
+    },
+    "Technology": {
+        "en": [re.compile(rf"\b{w}\b", re.I) for w in ['tech', 'technology', 'smartphone', 'software', 'hardware', 'ai', 'cyber', 'robot', 'apple', 'google', 'microsoft', 'tesla', 'nvidia', 'semiconductor', 'quantum', 'startup', 'innovation']],
+        "th": ['มือถือ', 'ไอที', 'คอมพิวเตอร์', 'หุ่นยนต์', 'สมาร์ทโฟน', 'แอพ', 'แอป', 'เทคโนโลยี', 'อวกาศ', 'นวัตกรรม', 'ยานยนต์ไฟฟ้า', 'อีวี', 'ปัญญาประดิษฐ์']
+    },
+    "Economy": {
+        "en": [re.compile(rf"\b{w}\b", re.I) for w in ['economy', 'economic', 'gdp', 'inflation', 'trade', 'export', 'import', 'recession', 'tax', 'budget', 'tariff', 'fiscal', 'monetary']],
+        "th": ['เศรษฐกิจ', 'ส่งออก', 'เงินเฟ้อ', 'จีดีพี', 'ภาษี', 'พาณิชย์', 'งบประมาณ', 'ดุลการค้า', 'ค่าเงิน']
+    },
+    "Finance": {
+        "en": [re.compile(rf"\b{w}\b", re.I) for w in ['finance', 'bank', 'stock', 'crypto', 'investment', 'market', 'bitcoin', 'btc', 'eth', 'nasdaq', 'gold', 'dividend', 'portfolio', 'forex', 'insurance']],
+        "th": ['หุ้น', 'การเงิน', 'ธนาคาร', 'คริปโต', 'บิทคอยน์', 'ทองคำ', 'ดอกเบี้ย', 'เงินฝาก', 'เซต', 'set', 'ปันผล', 'ลงทุน', 'กองทุน']
+    },
+    "Education": {
+        "en": [re.compile(rf"\b{w}\b", re.I) for w in ['education', 'university', 'school', 'student', 'teacher', 'college', 'exam', 'scholarship', 'learning', 'academic', 'curriculum', 'literacy']],
+        "th": ['การศึกษา', 'นักเรียน', 'นักศึกษา', 'มหาวิทยาลัย', 'โรงเรียน', 'สอบ', 'ทุนการศึกษา', 'เรียนต่อ', 'วิชาการ', 'ครู', 'หลักสูตร']
+    },
+    "Entertainment": {
+        "en": [re.compile(rf"\b{w}\b", re.I) for w in ['entertainment', 'movie', 'music', 'celebrity', 'hollywood', 'netflix', 'kpop', 'anime', 'gaming', 'esports', 'drama', 'showbiz', 'streaming', 'concert']],
+        "th": ['บันเทิง', 'ภาพยนตร์', 'หนัง', 'เพลง', 'ดารา', 'ซีรีส์', 'คอนเสิร์ต', 'เกม', 'ศิลปิน', 'ละคร', 'วงการบันเทิง', 'สตรีมมิ่ง']
+    },
+    "Politics": {
+        "en": [re.compile(rf"\b{w}\b", re.I) for w in ['politics', 'government', 'election', 'president', 'minister', 'parliament', 'senate', 'diplomacy', 'starmer', 'biden', 'trump', 'putin', 'zelensky', 'cabinet', 'senator', 'congress', 'white house', 'labour', 'tory', 'republican', 'democrat', 'policy', 'sanction', 'treaty', 'summit', 'war', 'military', 'pentagon', 'defense', 'nato', 'un', 'asean', 'missile', 'nuclear', 'iran', 'israel', 'gaza', 'hamas', 'hezbollah', 'ukraine', 'russia', 'china', 'taiwan', 'irgc', 'cia', 'fbi', 'protest', 'veto', 'legal', 'court']],
+        "th": ['การเมือง', 'เลือกตั้ง', 'รัฐบาล', 'นายก', 'สภา', 'ประท้วง', 'พรรค', 'ครม', 'รัฐมนตรี', 'ทักษิณ', 'ปชน', 'ปชป', 'ก้าวไกล', 'เพื่อไทย', 'ภูมิใจไทย', 'พลังประชารัฐ', 'ม็อบ', 'ชุมนุม', 'กฎหมาย', 'รัฐธรรมนูญ', 'ส.ส.', 'ส.ว.', 'วุฒิสภา', 'กกต', 'ปปช', 'ศาลรัฐธรรมนูญ', 'พ.ร.บ.', 'พ.ร.ก.', 'กม.', 'สงคราม', 'ทหาร', 'กลาโหม', 'ความมั่นคง', 'อาวุธ', 'อิหร่าน', 'อิสราเอล', 'ยูเครน', 'รัสเซีย', 'จีน', 'ไต้หวัน', 'พรรคร่วม', 'ปรับครม']
+    },
+    "General": {
+        "en": [re.compile(rf"\b{w}\b", re.I) for w in ['news', 'general', 'world', 'local', 'society', 'culture', 'lifestyle', 'health', 'environment', 'weather', 'travel']],
+        "th": ['ทั่วไป', 'สังคม', 'วัฒนธรรม', 'ชาวบ้าน', 'สรุป', 'รอบวัน', 'รอบโลก', 'สุขภาพ', 'สิ่งแวดล้อม', 'สภาพอากาศ', 'ท่องเที่ยว']
+    }
+}
+
 # --- Firebase Initialization ---
 import firebase_admin
 from firebase_admin import credentials, firestore
@@ -380,65 +425,19 @@ import re
 def assign_topic_category(text_to_search, fallback_category):
     text_lower = text_to_search.lower()
     
-    # Category definition with both English (regex-ready) and Thai keywords
-    # Order matters: more specific categories should come before general ones
-    keywords = {
-        "Breaking": {
-            "en": [r'breaking', r'urgent', r'alert', r'crisis', r'latest', r'just in', r'live'],
-            "th": ['ด่วน', 'ข่าวด่วน', 'อัปเดต', 'ประกาศสำคัญ', 'เกาะติด']
-        },
-        "Technology": {
-            "en": [r'tech', r'technology', r'smartphone', r'software', r'hardware', r'ai', r'cyber', r'robot', r'apple', r'google', r'microsoft', r'tesla', r'nvidia', r'semiconductor', r'quantum', r'startup', r'innovation'],
-            "th": ['มือถือ', 'ไอที', 'คอมพิวเตอร์', 'หุ่นยนต์', 'สมาร์ทโฟน', 'แอพ', 'แอป', 'เทคโนโลยี', 'อวกาศ', 'นวัตกรรม', 'ยานยนต์ไฟฟ้า', 'อีวี', 'ปัญญาประดิษฐ์']
-        },
-        "Economy": {
-            "en": [r'economy', r'economic', r'gdp', r'inflation', r'trade', r'export', r'import', r'recession', r'tax', r'budget', r'tariff', r'fiscal', r'monetary'],
-            "th": ['เศรษฐกิจ', 'ส่งออก', 'เงินเฟ้อ', 'จีดีพี', 'ภาษี', 'พาณิชย์', 'งบประมาณ', 'ดุลการค้า', 'ค่าเงิน']
-        },
-        "Finance": {
-            "en": [r'finance', r'bank', r'stock', r'crypto', r'investment', r'market', r'bitcoin', r'btc', r'eth', r'nasdaq', r'gold', r'dividend', r'portfolio', r'forex', r'insurance'],
-            "th": ['หุ้น', 'การเงิน', 'ธนาคาร', 'คริปโต', 'บิทคอยน์', 'ทองคำ', 'ดอกเบี้ย', 'เงินฝาก', 'เซต', 'set', 'ปันผล', 'ลงทุน', 'กองทุน']
-        },
-        "Education": {
-            "en": [r'education', r'university', r'school', r'student', r'teacher', r'college', r'exam', r'scholarship', r'learning', r'academic', r'curriculum', r'literacy'],
-            "th": ['การศึกษา', 'นักเรียน', 'นักศึกษา', 'มหาวิทยาลัย', 'โรงเรียน', 'สอบ', 'ทุนการศึกษา', 'เรียนต่อ', 'วิชาการ', 'ครู', 'หลักสูตร']
-        },
-        "Entertainment": {
-            "en": [r'entertainment', r'movie', r'music', r'celebrity', r'hollywood', r'netflix', r'kpop', r'anime', r'gaming', r'esports', r'drama', r'showbiz', r'streaming', r'concert'],
-            "th": ['บันเทิง', 'ภาพยนตร์', 'หนัง', 'เพลง', 'ดารา', 'ซีรีส์', 'คอนเสิร์ต', 'เกม', 'ศิลปิน', 'ละคร', 'วงการบันเทิง', 'สตรีมมิ่ง']
-        },
-        "Politics": {
-            "en": [r'politics', r'government', r'election', r'president', r'minister', r'parliament', r'senate', r'diplomacy', 
-                   r'starmer', r'biden', r'trump', r'putin', r'zelensky', r'cabinet', r'senator', r'congress', 
-                   r'white house', r'labour', r'tory', r'republican', r'democrat', r'policy', r'sanction', r'treaty', 
-                   r'summit', r'war', r'military', r'pentagon', r'defense', r'nato', r'un', r'asean', r'missile', 
-                   r'nuclear', r'iran', r'israel', r'gaza', r'hamas', r'hezbollah', r'ukraine', r'russia', r'china', 
-                   r'taiwan', r'irgc', r'cia', r'fbi', r'protest', r'veto', r'legal', r'court'],
-            "th": ['การเมือง', 'เลือกตั้ง', 'รัฐบาล', 'นายก', 'สภา', 'ประท้วง', 'พรรค', 'ครม', 'รัฐมนตรี', 'ทักษิณ', 
-                   'ปชน', 'ปชป', 'ก้าวไกล', 'เพื่อไทย', 'ภูมิใจไทย', 'พลังประชารัฐ', 'ม็อบ', 'ชุมนุม', 'กฎหมาย', 
-                   'รัฐธรรมนูญ', 'ส.ส.', 'ส.ว.', 'วุฒิสภา', 'กกต', 'ปปช', 'ศาลรัฐธรรมนูญ', 'พ.ร.บ.', 'พ.ร.ก.', 
-                   'กม.', 'สงคราม', 'ทหาร', 'กลาโหม', 'ความมั่นคง', 'อาวุธ', 'อิหร่าน', 'อิสราเอล', 'ยูเครน', 
-                   'รัสเซีย', 'จีน', 'ไต้หวัน', 'พรรคร่วม', 'ปรับครม']
-        },
-        "General": {
-            "en": [r'news', r'general', r'world', r'local', r'society', r'culture', r'lifestyle', r'health', r'environment', r'weather', r'travel'],
-            "th": ['ทั่วไป', 'สังคม', 'วัฒนธรรม', 'ชาวบ้าน', 'สรุป', 'รอบวัน', 'รอบโลก', 'สุขภาพ', 'สิ่งแวดล้อม', 'สภาพอากาศ', 'ท่องเที่ยว']
-        }
-    }
-    
-    import re
-    for category, langs in keywords.items():
-        # 1. Check English keywords with word boundaries (\b)
-        for en_word in langs["en"]:
-            if re.search(rf'\b{en_word}\b', text_lower):
+    for category, langs in CATEGORIES_KEYWORDS.items():
+        # 1. Check English keywords (Pre-compiled Regex)
+        for pattern in langs["en"]:
+            if pattern.search(text_lower):
                 return category
         
-        # 2. Check Thai keywords (normal substring match since Thai doesn't use spaces)
+        # 2. Check Thai keywords (Substring match)
         for th_word in langs["th"]:
             if th_word in text_lower:
                 return category
             
     return fallback_category
+
 
 @st.cache_data(ttl=600)
 def get_word_cloud_data(all_titles):
@@ -487,9 +486,7 @@ def get_word_cloud_data(all_titles):
 
 def check_keyword_match(keyword, text_lower):
     """
-    Checks if a keyword exists in text.
-    Uses word boundaries for English/Latin words to avoid false positives (e.g., 'AI' matching 'Again').
-    Uses substring matching for Thai as it doesn't use spaces.
+    Highly optimized keyword matcher.
     """
     if not keyword: return False
     
@@ -497,12 +494,29 @@ def check_keyword_match(keyword, text_lower):
     has_thai = any('\u0E00' <= c <= '\u0E7F' for c in keyword)
     
     if has_thai:
-        # Substring match for Thai
         return keyword in text_lower
     else:
-        # Word boundary match for English/Latin
-        # Use re.escape to handle special characters in keywords
-        return re.search(rf'\b{re.escape(keyword)}\b', text_lower) is not None
+        # English: Word boundary check
+        return re.search(rf'\b{re.escape(keyword)}\b', text_lower, re.I) is not None
+
+def enrich_item(item):
+    """Adds category and watchlist metadata to an item once."""
+    title_lower = item['title'].lower()
+    item['category'] = assign_topic_category(title_lower, item.get('category', 'General'))
+    
+    # Watchlist check
+    item['is_monitored'] = False
+    item['match_color'] = "#FFD700"
+    
+    # Use global monitored words if available, else session state
+    # This is a bit tricky with threads, so we'll pass them in or use a lock
+    monitored = monitored_words if 'monitored_words' in globals() else []
+    for word in monitored:
+        if check_keyword_match(word, title_lower):
+            item['is_monitored'] = True
+            item['match_color'] = kw_colors.get(word, "#FFD700")
+            break
+    return item
 
 def fetch_reddit():
     url = "https://www.reddit.com/r/popular/top.json?limit=15&t=day"
@@ -514,74 +528,65 @@ def fetch_reddit():
         for child in data.get('data', {}).get('children', []):
             post = child['data']
             search_text = post['title'] + " " + post.get('subreddit', '')
-            items.append({
+            item = {
                 "id": f"reddit_{post['id']}",
                 "title": post['title'],
                 "url": f"https://www.reddit.com{post['permalink']}",
                 "source": "Reddit",
                 "base_score": post['score'],
-                "category": assign_topic_category(search_text, "General")
-            })
+                "category": "General" # Initial
+            }
+            items.append(enrich_item(item))
         return items
     except Exception as e:
-        # Reddit often rate-limits or returns empty — fail silently, retry next cycle
         return []
 
 def fetch_rss(feed_url, source_name, category):
     try:
-        # Define boosted scores for reputable sources
         source_boosts = {
-            "Reuters": 1000,
-            "AP News": 1000,
-            "BBC News": 800,
-            "The Information": 600,
-            "Axios": 600,
-            "CNN": 400,
-            "Al Jazeera": 400,
-            "MIT Tech Review": 500,
-            "Wired": 400
+            "Reuters": 1000, "AP News": 1000, "BBC News": 800, "The Information": 600,
+            "Axios": 600, "CNN": 400, "Al Jazeera": 400, "MIT Tech Review": 500, "Wired": 400
         }
         base_score = source_boosts.get(source_name, 100)
         
         feed = feedparser.parse(feed_url)
         items = []
         for entry in feed.entries[:10]:
-            tags = " ".join([t.term for t in entry.get('tags', [])]) if hasattr(entry, 'tags') else ""
-            search_text = entry.title + " " + tags
-            items.append({
+            item = {
                 "id": f"rss_{source_name}_{entry.id if hasattr(entry, 'id') else entry.link}",
                 "title": entry.title,
                 "url": entry.link,
                 "source": source_name,
                 "base_score": base_score,
-                "category": assign_topic_category(search_text, category)
-            })
+                "category": category
+            }
+            items.append(enrich_item(item))
         return items
     except Exception as e:
         return []
 
 def fetch_pantip():
-    url = "https://pantip.com/home/feed/pantip_trend" # Attempting trend feed or homepage
+    url = "https://pantip.com/"
     headers = {"User-agent": "Mozilla/5.0"}
     try:
-        res = requests.get("https://pantip.com/", headers=headers, timeout=5)
+        res = requests.get(url, headers=headers, timeout=5)
         soup = BeautifulSoup(res.content, 'html.parser')
         items = []
-        # Find links that look like topics
         links = soup.find_all('a', href=True)
         added_urls = set()
         for link in links:
             href = link['href']
             title = link.text.strip()
             if '/topic/' in href and len(title) > 20 and href not in added_urls:
-                items.append({
+                item = {
                     "id": f"pantip_{href.split('/')[-1]}",
                     "title": title,
                     "url": href if href.startswith('http') else f"https://pantip.com{href}",
                     "source": "Pantip",
-                    "base_score": 250, # High base score for Pantip trends
-                    "category": assign_topic_category(title, "General")
-                })
+                    "base_score": 250,
+                    "category": "General"
+                }
+                items.append(enrich_item(item))
                 added_urls.add(href)
             if len(items) >= 10:
                 break
@@ -596,38 +601,30 @@ def fetch_longdo():
         response = requests.get(url, headers=headers, timeout=5)
         data = response.json()
         items = []
-        for event in data[:20]: # Latest 20 incidents
+        for event in data[:20]:
             title = event.get('title', 'Traffic Alert')
             detail = event.get('detail', '')
             source = event.get('source', 'iTIC')
-            
-            # Use JS100 or FM91 if they are the source, else use 'Traffic Alert'
-            display_source = source if source in ["JS100", "FM91"] else f"Traffic ({source})"
-            
-            items.append({
+            item = {
                 "id": f"longdo_{event.get('eid')}",
                 "title": f"[{title}] {detail}",
                 "url": event.get('url', f"https://traffic.longdo.com/"),
                 "source": "Traffic Alert",
-                "base_score": 1000, # High priority for real-time traffic
+                "base_score": 1000,
                 "category": "Breaking"
-            })
+            }
+            items.append(enrich_item(item))
         return items
     except Exception as e:
         return []
 
+
 def fetch_nitter(path, source_name, category):
-    # List of currently active and stable Nitter instances as of May 2026
     instances = [
-        "https://nitter.perennialte.ch",
-        "https://nitter.projectsegfau.lt",
-        "https://nitter.moomoo.me",
-        "https://xcancel.com",
-        "https://nitter.cz",
-        "https://nitter.no-logs.com"
+        "https://nitter.perennialte.ch", "https://nitter.projectsegfau.lt", "https://nitter.moomoo.me",
+        "https://xcancel.com", "https://nitter.cz", "https://nitter.no-logs.com"
     ]
-    
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
+    headers = {"User-Agent": "Mozilla/5.0"}
     
     from concurrent.futures import ThreadPoolExecutor, FIRST_COMPLETED, wait
     
@@ -637,35 +634,30 @@ def fetch_nitter(path, source_name, category):
             response = requests.get(url, headers=headers, timeout=5)
             if response.status_code == 200:
                 feed = feedparser.parse(response.text)
-                if feed.entries:
-                    return feed.entries
-        except:
-            pass
+                if feed.entries: return feed.entries
+        except: pass
         return None
 
-    # Check all instances in parallel! First one to respond wins.
     with ThreadPoolExecutor(max_workers=len(instances)) as executor:
         futures = [executor.submit(check_instance, inst) for inst in instances]
-        # Wait for the first success or all failures
         done, _ = wait(futures, return_when=FIRST_COMPLETED)
         
         for future in done:
             entries = future.result()
             if entries:
-                # Success! Boost reputable tech sources
                 source_boosts = {"The Information": 600, "Axios": 600}
                 base_score = source_boosts.get(source_name, 100)
-                
                 items = []
                 for entry in entries[:10]:
-                    items.append({
+                    item = {
                         "id": f"nitter_{source_name}_{entry.link}",
                         "title": entry.title,
                         "url": entry.link,
                         "source": source_name,
                         "base_score": base_score,
-                        "category": assign_topic_category(entry.title, category)
-                    })
+                        "category": category
+                    }
+                    items.append(enrich_item(item))
                 return items
     return []
 
@@ -673,8 +665,6 @@ def get_raw_data(sources_selected):
     from concurrent.futures import ThreadPoolExecutor, as_completed
     all_items = []
     
-    # Mapping of source names to their fetch configurations
-    # (Source Name, Fetch Function, Args)
     fetch_configs = [
         ("Reddit (Global Trends)", fetch_reddit, ()),
         ("BBC (Global News)", fetch_rss, ("http://feeds.bbci.co.uk/news/rss.xml", "BBC News", "General")),
@@ -704,8 +694,8 @@ def get_raw_data(sources_selected):
         ("Axios (News)", fetch_nitter, ("/axios/rss", "Axios", "Technology"))
     ]
     
-    # Increase max_workers to 45 for true parallel execution of all sources
-    with ThreadPoolExecutor(max_workers=45) as executor:
+    # Optimized max_workers to 15 to reduce resource contention
+    with ThreadPoolExecutor(max_workers=15) as executor:
         future_to_source = {
             executor.submit(func, *args): name 
             for name, func, args in fetch_configs 
@@ -714,72 +704,57 @@ def get_raw_data(sources_selected):
         
         for future in as_completed(future_to_source):
             try:
-                # Individual source timeout of 5 seconds
                 all_items.extend(future.result(timeout=5))
-            except Exception as e:
-                # If one source fails or times out, we continue with the others
-                continue
+            except: continue
                 
     return all_items
 
+
 def fetch_all_data(sources_selected):
-    # Provide subtle feedback that fetching is starting
     with st.spinner("🔄 Fetching news from all sources..."):
         st.toast("🗞️ Starting news fetch...", icon="🔄")
         all_items = get_raw_data(sources_selected)
         if not all_items:
-            st.error("Failed to fetch news. Please check your internet connection or sources.")
+            st.error("Failed to fetch news.")
         st.session_state.fetched_items = all_items
+    
     fetch_time = time.time()
     st.session_state['last_fetch_time'] = fetch_time
-    BG_CONFIG["last_fetch_time"] = fetch_time
-    # Write to file so background thread and UI stay in sync
-    try:
-        file_path = os.path.join(os.path.dirname(__file__), 'last_fetch.txt')
-        with open(file_path, 'w') as f:
-            f.write(str(fetch_time))
-    except:
-        pass
     
-    # Mark these as SEEN so the background thread doesn't resend them
+    with STATE_LOCK:
+        GLOBAL_STATE["last_fetch_time"] = fetch_time
+        GLOBAL_STATE["latest_items"] = all_items
+    
     global SEEN_IDS
     for item in all_items:
         SEEN_IDS.add(item['id'])
 
-# API server removed for Streamlit Cloud compatibility
-
 def bg_fetch_loop():
-    global SEEN_IDS, LATEST_NEWS, BG_CONFIG
+    global SEEN_IDS, LATEST_NEWS
     while True:
-        interval = BG_CONFIG["interval_minutes"]
-        if interval > 0 and BG_CONFIG.get("running", False):
+        with STATE_LOCK:
+            interval = BG_CONFIG["interval_minutes"]
+            running = BG_CONFIG.get("running", False)
+            last_fetch = BG_CONFIG["last_fetch_time"]
+            selected_sources = BG_CONFIG.get("sources", [])
+        
+        if interval > 0 and running:
             now = time.time()
-            if now - BG_CONFIG["last_fetch_time"] > interval * 60:
+            if now - last_fetch > interval * 60:
                 try:
-                    all_sources = [src[0] for src in sources_data]
-                    new_items = get_raw_data(all_sources)
-                    for item in new_items:
-                        if item['id'] not in SEEN_IDS:
-                            SEEN_IDS.add(item['id'])
-                            LATEST_NEWS.append({
-                                "id": item['id'], 
-                                "title": item['title'], 
-                                "category": item['category'], 
-                                "score": item['base_score'],
-                                "url": item['url'],
-                                "source": item['source']
-                            })
-                    BG_CONFIG["last_fetch_time"] = time.time()
-                    # Write to file so Streamlit UI can read it
-                    try:
-                        file_path = os.path.join(os.path.dirname(__file__), 'last_fetch.txt')
-                        with open(file_path, 'w') as f:
-                            f.write(str(BG_CONFIG["last_fetch_time"]))
-                    except:
-                        pass
-                except Exception as e:
-                    pass
+                    new_items = get_raw_data(selected_sources)
+                    with STATE_LOCK:
+                        for item in new_items:
+                            if item['id'] not in SEEN_IDS:
+                                SEEN_IDS.add(item['id'])
+                                LATEST_NEWS.append(item)
+                                GLOBAL_STATE["latest_items"].append(item)
+                        
+                        GLOBAL_STATE["last_fetch_time"] = time.time()
+                        BG_CONFIG["last_fetch_time"] = GLOBAL_STATE["last_fetch_time"]
+                except: pass
         time.sleep(10)
+
 
 if 'bg_fetcher_started' not in st.session_state:
     threading.Thread(target=bg_fetch_loop, daemon=True).start()
@@ -948,24 +923,37 @@ if 'cb_initialized' not in st.session_state:
     st.session_state.monitored_keywords = load_monitored_keywords()
     st.session_state.cb_initialized = True
 
+MATCH_PALETTE = ["#FFD700", "#00FFFF", "#39FF14", "#FF00FF", "#FFA500", "#FF3131", "#1F51FF", "#F0E68C"]
+
+def on_keywords_change():
+    new_val = st.session_state.monitored_keywords
+    save_monitored_keywords(new_val)
+    
+    words = [w.strip().lower() for w in new_val.replace("\n", ",").split(",") if w.strip()]
+    colors = {word: MATCH_PALETTE[i % len(MATCH_PALETTE)] for i, word in enumerate(words)}
+    
+    if 'fetched_items' in st.session_state and st.session_state.fetched_items:
+        for item in st.session_state.fetched_items:
+            title_lower = item['title'].lower()
+            item['is_monitored'] = False
+            item['match_color'] = "#FFD700"
+            for word in words:
+                if check_keyword_match(word, title_lower):
+                    item['is_monitored'] = True
+                    item['match_color'] = colors.get(word, "#FFD700")
+                    break
+
 st.sidebar.markdown("### 🎯 Watchlist")
 monitored_input = st.sidebar.text_area("Monitored Keywords (comma separated)", 
-                                     value=st.session_state.get('monitored_keywords', ""),
+                                     key="monitored_keywords",
                                      placeholder="e.g. AI, Tesla, ก้าวไกล",
-                                     help="Items matching these words will be highlighted and added to the 'Watchlist' tab.")
-
-if monitored_input != st.session_state.get('monitored_keywords', ""):
-    st.session_state.monitored_keywords = monitored_input
-    save_monitored_keywords(monitored_input)
-    # Ensure Watchlist state is fresh
-    if 'fetched_items' in st.session_state:
-        st.rerun()
+                                     help="Items matching these words will be highlighted and added to the 'Watchlist' tab.",
+                                     on_change=on_keywords_change)
 
 # Improved splitting: handle commas and newlines (allow spaces within phrases)
 monitored_words = [w.strip().lower() for w in monitored_input.replace("\n", ",").split(",") if w.strip()]
 
 # Assign unique colors to each keyword
-MATCH_PALETTE = ["#FFD700", "#00FFFF", "#39FF14", "#FF00FF", "#FFA500", "#FF3131", "#1F51FF", "#F0E68C"]
 kw_colors = {word: MATCH_PALETTE[i % len(MATCH_PALETTE)] for i, word in enumerate(monitored_words)}
 
 # User feedback in sidebar
@@ -1098,15 +1086,16 @@ BG_CONFIG["sources"] = selected_sources
 
 if enable_auto and auto_refresh_interval > 0 and st.session_state.get('running_state', False):
     last_fetch = st.session_state.get('last_fetch_time', 0)
-    try:
-        file_path = os.path.join(os.path.dirname(__file__), 'last_fetch.txt')
-        with open(file_path, 'r') as f:
-            file_ts = float(f.read().strip())
-            if file_ts > last_fetch:
-                st.session_state['last_fetch_time'] = file_ts
-                st.rerun()
-    except: pass
-    last_fetch = st.session_state.get('last_fetch_time', 0)
+    with STATE_LOCK:
+        global_ts = GLOBAL_STATE.get("last_fetch_time", 0)
+        global_items = GLOBAL_STATE.get("latest_items", [])
+    
+    if global_ts > last_fetch:
+        st.session_state['last_fetch_time'] = global_ts
+        # Sync latest items from background thread to UI session
+        st.session_state['fetched_items'] = global_items
+        st.rerun()
+
     last_time_str = format_ts(last_fetch)
     next_time_str = format_ts(last_fetch + auto_refresh_interval * 60) if last_fetch > 0 else "--:--:--"
     with st.sidebar:
@@ -1130,6 +1119,7 @@ if enable_auto and auto_refresh_interval > 0 and st.session_state.get('running_s
         }}
         setInterval(tick, 1000); tick();
         </script>""", height=105)
+
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("<div style='text-align: center; color: #bbb; font-size: 15px;'>Credits: <b style='color: white;'>Joopiest Udomsaph</b></div>", unsafe_allow_html=True)
@@ -1175,16 +1165,10 @@ else:
         item_id = item['id']
         current_vote = st.session_state.user_votes.get(item_id, 0)
         
-        # Check Monitoring
-        is_monitored = False
-        title_lower = item['title'].lower()
-        matched_word = ""
-        match_color = "#FFD700" # Default
-        for word in monitored_words:
-            if check_keyword_match(word, title_lower):
-                is_monitored, matched_word = True, word.upper()
-                match_color = kw_colors.get(word, "#FFD700")
-                break
+        # Metadata pre-calculated during fetch
+        is_monitored = item.get('is_monitored', False)
+        match_color = item.get('match_color', "#FFD700")
+        category = item.get('category', 'General')
         
         col_vote, col_content = st.columns([2.5, 7.5])
         with col_vote:
@@ -1210,13 +1194,11 @@ else:
                 "MIT Tech Review": "#A31F34", "Wired": "#111827", "Physics World": "#2563EB", "X (Twitter)": "#000000"
             }
             bg_color = source_colors.get(item['source'], "#444")
-            # --- SUPER PROMINENT BLINKING HIGHLIGHT ---
             card_class = "news-card monitored-card" if is_monitored else "news-card"
-            # Use specific match color for border and glow
             card_style = f"border: 3px solid {match_color}; box-shadow: 0 0 15px {match_color}44;" if is_monitored else ""
-            match_badge = f'<span style="background-color: {match_color}; color: #000; padding: 2px 8px; border-radius: 4px; font-weight: 900; font-size: 11px; margin-right: 8px; box-shadow: 0 0 15px {match_color}; animation: match-pulse 1s infinite;">🎯 MATCH: {matched_word}</span>' if is_monitored else ""
+            match_badge = f'<span style="background-color: {match_color}; color: #000; padding: 2px 8px; border-radius: 4px; font-weight: 900; font-size: 11px; margin-right: 8px; box-shadow: 0 0 15px {match_color}; animation: match-pulse 1s infinite;">🎯 WATCHLIST</span>' if is_monitored else ""
             
-            st.markdown(f'<div class="{card_class}" style="{card_style}"><div style="flex: 1;"><span class="source-badge" style="background-color: {bg_color};">{item["source"]}</span> <span class="category-badge">{item["category"]}</span> {match_badge}<br><a class="news-title" href="{item["url"]}" target="_blank" style="color: {match_color if is_monitored else "white"} !important; font-weight: {"900" if is_monitored else "normal"};">{item["title"]}</a></div></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{card_class}" style="{card_style}"><div style="flex: 1;"><span class="source-badge" style="background-color: {bg_color};">{item["source"]}</span> <span class="category-badge">{category}</span> {match_badge}<br><a class="news-title" href="{item["url"]}" target="_blank" style="color: {match_color if is_monitored else "white"} !important; font-weight: {"900" if is_monitored else "normal"};">{item["title"]}</a></div></div>', unsafe_allow_html=True)
 
     tab_options = ["📊 Digg Stack", "All Feed", "🎯 Watchlist", "Breaking", "Technology", "Education", "Politics", "Finance", "Economy", "Entertainment", "General"]
     active_tab = st.session_state.get('active_tab', "📊 Digg Stack")
@@ -1244,11 +1226,7 @@ else:
     elif active_tab == "🎯 Watchlist":
         # Use ALL fetched items for Watchlist, ignoring source/search filters
         all_fetched = st.session_state.get('fetched_items', [])
-        watch_items = []
-        for item in all_fetched:
-            title_l = item['title'].lower()
-            if any(check_keyword_match(w, title_l) for w in monitored_words):
-                watch_items.append(item)
+        watch_items = [item for item in all_fetched if item.get('is_monitored', False)]
         
         # Sort by total score
         watch_items = sorted(watch_items, key=get_total_score, reverse=True)
@@ -1259,28 +1237,21 @@ else:
             for idx, item in enumerate(watch_items):
                 with cols[idx % 3]: render_item(item, f"watch_{idx}")
     elif active_tab == "📊 Digg Stack":
+        # Minimized serialization for Digg Stack
         stack_data = []
         for item in sorted_items:
-            # Check monitoring state and color for each item in the stack
-            is_m = False
-            m_color = "#FFD700"
-            for word in monitored_words:
-                if check_keyword_match(word, item['title'].lower()):
-                    is_m = True
-                    m_color = kw_colors.get(word, "#FFD700")
-                    break
-            
             stack_data.append({
                 "id": item['id'], 
                 "title": item['title'], 
-                "category": item['category'], 
+                "category": item.get('category', 'General'), 
                 "score": get_total_score(item), 
                 "url": item['url'], 
                 "source": item['source'],
-                "is_monitored": is_m,
-                "match_color": m_color
+                "is_monitored": item.get('is_monitored', False),
+                "match_color": item.get('match_color', "#FFD700")
             })
         js_data = json.dumps(stack_data)
+
         html_code = """
         <!-- FORCE RELOAD V3 -->
         <!DOCTYPE html>
