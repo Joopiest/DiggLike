@@ -532,9 +532,18 @@ def check_keyword_match(keyword, text_lower):
         return re.search(rf'\b{re.escape(keyword)}\b', text_lower, re.I) is not None
 
 def enrich_item(item):
-    """Adds category and watchlist metadata to an item once."""
+    """Adds category, watchlist metadata, and fetch time to an item once."""
     title_lower = item['title'].lower()
     item['category'] = assign_topic_category(title_lower, item.get('category', 'General'))
+    
+    # Store formatted fetch time for tooltips (Include seconds)
+    try:
+        if 'user_tz' in globals():
+            item['fetch_time'] = datetime.now(timezone.utc).astimezone(user_tz).strftime("%H:%M:%S")
+        else:
+            item['fetch_time'] = datetime.now().strftime("%H:%M:%S")
+    except:
+        item['fetch_time'] = datetime.now().strftime("%H:%M:%S")
     
     # Watchlist check
     item['is_monitored'] = False
@@ -1283,7 +1292,8 @@ else:
                 "url": item['url'], 
                 "source": item['source'],
                 "is_monitored": item.get('is_monitored', False),
-                "match_color": item.get('match_color', "#FFD700")
+                "match_color": item.get('match_color', "#FFD700"),
+                "fetch_time": item.get('fetch_time', "--:--:--")
             })
         js_data = json.dumps(stack_data)
 
@@ -1350,29 +1360,34 @@ else:
                         this.x = x;
                         this.y = y;
                         this.color = color;
-                        this.vx = (Math.random() - 0.5) * 6;
-                        this.vy = (Math.random() - 1) * 8;
+                        this.vx = (Math.random() - 0.5) * 12; // More explosive width
+                        this.vy = (Math.random() - 1.2) * 14; // Higher initial pop
                         this.life = 1.0;
-                        this.decay = 0.02 + Math.random() * 0.02;
-                        this.size = 2 + Math.random() * 3;
+                        this.decay = 0.015 + Math.random() * 0.02; // Slower fade
+                        this.size = 3 + Math.random() * 5; // Larger particles
                     }
                     update() {
                         this.x += this.vx;
                         this.y += this.vy;
-                        this.vy += 0.2; // Gravity
+                        this.vy += 0.35; // Stronger gravity
                         this.life -= this.decay;
                     }
                     draw() {
+                        if (this.life <= 0) return;
+                        ctx.save();
                         ctx.fillStyle = this.color;
                         ctx.globalAlpha = this.life;
+                        // Add glow to particles
+                        ctx.shadowBlur = 10;
+                        ctx.shadowColor = this.color;
                         ctx.beginPath();
                         ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
                         ctx.fill();
-                        ctx.globalAlpha = 1.0;
+                        ctx.restore();
                     }
                 }
 
-                function spawnSparks(x, y, color, count = 10) {
+                function spawnSparks(x, y, color, count = 25) { // More sparks
                     for (let i = 0; i < count; i++) {
                         particles.push(new Particle(x, y, color));
                     }
@@ -1671,6 +1686,13 @@ else:
                     for (let block of blocks) {
                         block.update();
                         block.draw();
+                    }
+
+                    // --- NEW: Update and Draw Particles (Sparks) ---
+                    for (let i = particles.length - 1; i >= 0; i--) {
+                        particles[i].update();
+                        particles[i].draw();
+                        if (particles[i].life <= 0) particles.splice(i, 1);
                     }
                     
                     if (initialized) {
