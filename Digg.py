@@ -537,12 +537,11 @@ def enrich_item(item):
     title_lower = item['title'].lower()
     item['category'] = assign_topic_category(title_lower, item.get('category', 'General'))
     
-    # Store formatted fetch time for tooltips (Include seconds)
+    # Store formatted fetch time using the thread-safe global timezone
     try:
-        if 'user_tz' in globals():
-            item['fetch_time'] = datetime.now(timezone.utc).astimezone(user_tz).strftime("%H:%M:%S")
-        else:
-            item['fetch_time'] = datetime.now().strftime("%H:%M:%S")
+        with STATE_LOCK:
+            active_tz = GLOBAL_STATE.get("user_tz", timezone(timedelta(hours=7)))
+        item['fetch_time'] = datetime.now(timezone.utc).astimezone(active_tz).strftime("%H:%M:%S")
     except:
         item['fetch_time'] = datetime.now().strftime("%H:%M:%S")
     
