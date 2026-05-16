@@ -31,7 +31,8 @@ STATE_LOCK = threading.Lock()
 GLOBAL_STATE = {
     "last_fetch_time": 0,
     "running": False,
-    "latest_items": []
+    "latest_items": [],
+    "user_tz": timezone(timedelta(hours=7)) # Default to Bangkok
 }
 
 # --- Pre-compiled Keywords for Categorization ---
@@ -1111,6 +1112,9 @@ st.sidebar.subheader("🌐 Timezone")
 TIMEZONE_OPTIONS = {"UTC+07:00 (Bangkok/Jakarta)": 7, "UTC+00:00 (London/GMT)": 0, "UTC-08:00 (Pacific US)": -8, "UTC-05:00 (Eastern US)": -5}
 selected_tz_name = st.sidebar.selectbox("Select Your Timezone", list(TIMEZONE_OPTIONS.keys()), index=0)
 user_tz = timezone(timedelta(hours=TIMEZONE_OPTIONS[selected_tz_name]))
+
+with STATE_LOCK:
+    GLOBAL_STATE["user_tz"] = user_tz
 
 def format_ts(ts):
     if ts <= 0: return "--:--:--"
