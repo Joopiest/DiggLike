@@ -997,9 +997,9 @@ for internal_name, display_name in sources_data:
     if val:
         selected_sources.append(internal_name)
 
-# --- FAIL-SAFE: If no sources selected, default to ALL to prevent empty screen ---
-if not selected_sources:
-    selected_sources = [src[0] for src in sources_data]
+# --- FAIL-SAFE REMOVED to allow explicit empty state ---
+# if not selected_sources:
+#     selected_sources = [src[0] for src in sources_data]
 
 st.sidebar.caption(f"📂 Sources selected: {len(selected_sources)} / {len(sources_data)}")
 if search_query:
@@ -1157,7 +1157,7 @@ else:
         "Thairath (Thai News)": "Thairath", "Blognone (IT News)": "Blognone", "The Standard (Thai News)": "The Standard",
         "Krungthep Turakij (Business News)": "Krungthep Turakij", "Spaceth.co (Space News)": "Spaceth.co",
         "Physics.org (Science News)": "Phys.org", "Space.com (Space News)": "Space.com", "MIT Tech Review (Tech News)": "MIT Tech Review",
-        "Wired Magazine (Tech News)": "Wired", "Physics World (Science News)": "Physics World", "X (Twitter Trends)": "X (Twitter)"
+        "Wired Magazine (Tech News)": "Wired", "Physics World (Science News)": "Physics World", "X (Twitter)": "X (Twitter)"
     }
     
     allowed_names = [SOURCE_MAPPING.get(src, src) for src in selected_sources]
@@ -1216,16 +1216,7 @@ else:
             card_style = f"border: 3px solid {match_color}; box-shadow: 0 0 15px {match_color}44;" if is_monitored else ""
             match_badge = f'<span style="background-color: {match_color}; color: #000; padding: 2px 8px; border-radius: 4px; font-weight: 900; font-size: 11px; margin-right: 8px; box-shadow: 0 0 15px {match_color}; animation: match-pulse 1s infinite;">🎯 MATCH: {matched_word}</span>' if is_monitored else ""
             
-            st.markdown(f"""
-                <div class="{card_class}" style="{card_style}">
-                    <div style="flex: 1;">
-                        <span class="source-badge" style="background-color: {bg_color};">{item['source']}</span>
-                        <span class="category-badge">{item['category']}</span>
-                        {match_badge}
-                        <a class="news-title" href="{item['url']}" target="_blank" style="color: {match_color if is_monitored else 'white'} !important; font-weight: {'900' if is_monitored else 'normal'};">{item['title']}</a>
-                    </div>
-                </div>
-            """, unsafe_allow_html=True)
+            st.markdown(f'<div class="{card_class}" style="{card_style}"><div style="flex: 1;"><span class="source-badge" style="background-color: {bg_color};">{item["source"]}</span> <span class="category-badge">{item["category"]}</span> {match_badge}<br><a class="news-title" href="{item["url"]}" target="_blank" style="color: {match_color if is_monitored else "white"} !important; font-weight: {"900" if is_monitored else "normal"};">{item["title"]}</a></div></div>', unsafe_allow_html=True)
 
     tab_options = ["📊 Digg Stack", "All Feed", "🎯 Watchlist", "Breaking", "Technology", "Education", "Politics", "Finance", "Economy", "Entertainment", "General"]
     active_tab = st.session_state.get('active_tab', "📊 Digg Stack")
@@ -1500,6 +1491,10 @@ else:
                 async function init() {
                     if (canvas.height === 0) {
                         setTimeout(init, 100);
+                        return;
+                    }
+                    if (!rawData || rawData.length === 0) {
+                        blocks = []; queue = []; initialized = true;
                         return;
                     }
                     queue = [...rawData];
