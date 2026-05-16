@@ -1280,9 +1280,7 @@ else:
                 "is_monitored": is_m,
                 "match_color": m_color
             })
-        
-        # Limit to top 150 items for smooth 60fps animation
-        js_data = json.dumps(stack_data[:150])
+        js_data = json.dumps(stack_data)
         html_code = """
         <!-- FORCE RELOAD V3 -->
         <!DOCTYPE html>
