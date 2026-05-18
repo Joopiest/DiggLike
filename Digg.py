@@ -537,7 +537,10 @@ def enrich_item(item):
     title_lower = item['title'].lower()
     item['category'] = assign_topic_category(title_lower, item.get('category', 'General'))
     
-    # Store formatted fetch time using the thread-safe global timezone
+    # Store raw epoch timestamp for dynamic UI timezone conversion
+    item['fetch_timestamp'] = time.time()
+    
+    # Store formatted fetch time using the thread-safe global timezone (fallback)
     try:
         with STATE_LOCK:
             active_tz = GLOBAL_STATE.get("user_tz", timezone(timedelta(hours=7)))
@@ -586,7 +589,9 @@ def fetch_rss(feed_url, source_name, category):
     try:
         source_boosts = {
             "Reuters": 1000, "AP News": 1000, "BBC News": 800, "The Information": 600,
-            "Axios": 600, "CNN": 400, "Al Jazeera": 400, "MIT Tech Review": 500, "Wired": 400
+            "Axios": 600, "CNN": 400, "Al Jazeera": 400, "MIT Tech Review": 500, "Wired": 400,
+            "Bloomberg": 1000, "Wall Street Journal": 1000, "JS100": 800, "Isranews": 500, "Matichon": 500,
+            "Google News Int": 500
         }
         base_score = source_boosts.get(source_name, 100)
         
@@ -635,31 +640,6 @@ def fetch_pantip():
     except Exception as e:
         return []
 
-def fetch_longdo():
-    url = "https://event.longdo.com/feed/json"
-    headers = {"User-Agent": "Mozilla/5.0"}
-    try:
-        response = requests.get(url, headers=headers, timeout=5)
-        data = response.json()
-        items = []
-        for event in data[:20]:
-            title = event.get('title', 'Traffic Alert')
-            detail = event.get('detail', '')
-            source = event.get('source', 'iTIC')
-            item = {
-                "id": f"longdo_{event.get('eid')}",
-                "title": f"[{title}] {detail}",
-                "url": event.get('url', f"https://traffic.longdo.com/"),
-                "source": "Traffic Alert",
-                "base_score": 1000,
-                "category": "Breaking"
-            }
-            items.append(enrich_item(item))
-        return items
-    except Exception as e:
-        return []
-
-
 def fetch_nitter(path, source_name, category):
     instances = [
         "https://nitter.perennialte.ch", "https://nitter.projectsegfau.lt", "https://nitter.moomoo.me",
@@ -667,7 +647,7 @@ def fetch_nitter(path, source_name, category):
     ]
     headers = {"User-Agent": "Mozilla/5.0"}
     
-    from concurrent.futures import ThreadPoolExecutor, FIRST_COMPLETED, wait
+    from concurrent.futures import ThreadPoolExecutor, as_completed
     
     def check_instance(instance):
         url = f"{instance}{path}"
@@ -680,26 +660,26 @@ def fetch_nitter(path, source_name, category):
         return None
 
     with ThreadPoolExecutor(max_workers=len(instances)) as executor:
-        futures = [executor.submit(check_instance, inst) for inst in instances]
-        done, _ = wait(futures, return_when=FIRST_COMPLETED)
-        
-        for future in done:
-            entries = future.result()
-            if entries:
-                source_boosts = {"The Information": 600, "Axios": 600}
-                base_score = source_boosts.get(source_name, 100)
-                items = []
-                for entry in entries[:10]:
-                    item = {
-                        "id": f"nitter_{source_name}_{entry.link}",
-                        "title": entry.title,
-                        "url": entry.link,
-                        "source": source_name,
-                        "base_score": base_score,
-                        "category": category
-                    }
-                    items.append(enrich_item(item))
-                return items
+        futures = {executor.submit(check_instance, inst): inst for inst in instances}
+        for future in as_completed(futures):
+            try:
+                entries = future.result()
+                if entries:
+                    source_boosts = {"The Information": 600, "Axios": 600}
+                    base_score = source_boosts.get(source_name, 100)
+                    items = []
+                    for entry in entries[:10]:
+                        item = {
+                            "id": f"nitter_{source_name}_{entry.link}",
+                            "title": entry.title,
+                            "url": entry.link,
+                            "source": source_name,
+                            "base_score": base_score,
+                            "category": category
+                        }
+                        items.append(enrich_item(item))
+                    return items
+            except: pass
     return []
 
 def get_raw_data(sources_selected):
@@ -709,8 +689,13 @@ def get_raw_data(sources_selected):
     fetch_configs = [
         ("Reddit (Global Trends)", fetch_reddit, ()),
         ("BBC (Global News)", fetch_rss, ("http://feeds.bbci.co.uk/news/rss.xml", "BBC News", "General")),
+        ("Bloomberg (Business News)", fetch_rss, ("https://news.google.com/rss/search?q=site:bloomberg.com&hl=en-US&gl=US&ceid=US:en", "Bloomberg", "Economy")),
+        ("Google News (International)", fetch_rss, ("https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en", "Google News Int", "General")),
         ("Google News (Thailand)", fetch_rss, ("https://news.google.com/rss?hl=th&gl=TH&ceid=TH:th", "Google News TH", "General")),
         ("Google News TH (IT)", fetch_rss, ("https://news.google.com/rss/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZNRGRqTVhZU0FtVnVHZ0pKVGlnQVAB?hl=th&gl=TH&ceid=TH:th", "Google News TH (IT)", "Technology")),
+        ("Isranews (Thai News)", fetch_rss, ("https://news.google.com/rss/search?q=site:isranews.org&hl=th&gl=TH&ceid=TH:th", "Isranews", "General")),
+        ("JS100 (Traffic & News)", fetch_rss, ("https://news.google.com/rss/search?q=site:js100.com&hl=th&gl=TH&ceid=TH:th", "JS100", "Breaking")),
+        ("Matichon (Thai News)", fetch_rss, ("https://www.matichon.co.th/feed", "Matichon", "General")),
         ("Pantip (Thai Trends)", fetch_pantip, ()),
         ("CNN (Global News)", fetch_rss, ("http://rss.cnn.com/rss/edition.rss", "CNN", "General")),
         ("Al Jazeera (Global News)", fetch_rss, ("https://www.aljazeera.com/xml/rss/all.xml", "Al Jazeera", "General")),
@@ -724,11 +709,11 @@ def get_raw_data(sources_selected):
         ("MIT Tech Review (Tech News)", fetch_rss, ("https://www.technologyreview.com/feed/", "MIT Tech Review", "Technology")),
         ("Wired Magazine (Tech News)", fetch_rss, ("https://www.wired.com/feed/rss", "Wired", "Technology")),
         ("Physics World (Science News)", fetch_rss, ("https://physicsworld.com/feed/", "Physics World", "Technology")),
+        ("Wall Street Journal (Business News)", fetch_rss, ("https://news.google.com/rss/search?q=site:wsj.com&hl=en-US&gl=US&ceid=US:en", "Wall Street Journal", "Economy")),
         ("X (Twitter Trends)", fetch_nitter, ("/search/rss?q=news", "X (Twitter)", "Breaking")),
         ("TikTok Trends", fetch_rss, ("https://news.google.com/rss/search?q=site:tiktok.com+news&hl=en-US&gl=US&ceid=US:en", "TikTok", "Entertainment")),
         ("Threads Trends", fetch_rss, ("https://news.google.com/rss/search?q=site:threads.net+news&hl=en-US&gl=US&ceid=US:en", "Threads", "General")),
         ("Instagram Trends", fetch_rss, ("https://news.google.com/rss/search?q=site:instagram.com+news&hl=en-US&gl=US&ceid=US:en", "Instagram", "Entertainment")),
-        ("Traffic Alerts (iTIC/Longdo)", fetch_longdo, ()),
         ("Reuters (World News)", fetch_rss, ("https://news.google.com/rss/search?q=site:reuters.com&hl=en-US&gl=US&ceid=US:en", "Reuters", "General")),
         ("Associated Press (AP)", fetch_rss, ("https://news.google.com/rss/search?q=site:apnews.com&hl=en-US&gl=US&ceid=US:en", "AP News", "General")),
         ("The Information (Tech)", fetch_nitter, ("/theinformation/rss", "The Information", "Technology")),
@@ -895,19 +880,22 @@ with col_clear:
 sources_data = sorted([
     ("Reuters (World News)", "🟠 **Reuters**"),
     ("Associated Press (AP)", "🔴 **AP News**"),
-    ("The Information (Tech)", "⬛ **The Information**"),
     ("Axios (News)", "🟦 **Axios**"),
-    ("Traffic Alerts (iTIC/Longdo)", "🚨 **Traffic Alerts**"),
     ("TikTok Trends", "🎵 **TikTok Trends**"),
     ("Threads Trends", "🧵 **Threads Trends**"),
     ("Instagram Trends", "📸 **Instagram Trends**"),
     ("Al Jazeera (Global News)", "🟡 **Al Jazeera**"),
     ("BBC (Global News)", "🟥 **BBC News**"),
+    ("Bloomberg (Business News)", "📈 **Bloomberg**"),
     ("Blognone (IT News)", "🌐 **Blognone**"),
     ("CNN (Global News)", "🔴 **CNN**"),
+    ("Google News (International)", "🟦 **Google News Int**"),
     ("Google News (Thailand)", "🟦 **Google News TH**"),
     ("Google News TH (IT)", "🟨 **Google News TH (IT)**"),
+    ("Isranews (Thai News)", "📰 **Isranews**"),
+    ("JS100 (Traffic & News)", "📻 **JS100**"),
     ("Krungthep Turakij (Business News)", "🔵 **Krungthep Turakij**"),
+    ("Matichon (Thai News)", "🗞️ **Matichon**"),
     ("MIT Tech Review (Tech News)", "🦾 **MIT Tech Review**"),
     ("Pantip (Thai Trends)", "🟪 **Pantip**"),
     ("Physics World (Science News)", "⚛️ **Physics World**"),
@@ -915,8 +903,10 @@ sources_data = sorted([
     ("Reddit (Global Trends)", "🟧 **Reddit**"),
     ("Space.com (Space News)", "🌌 **Space.com**"),
     ("Spaceth.co (Space News)", "🚀 **Spaceth.co**"),
+    ("The Information (Tech)", "⬛ **The Information**"),
     ("The Standard (Thai News)", "⚫ **The Standard**"),
     ("Thairath (Thai News)", "🟢 **Thairath**"),
+    ("Wall Street Journal (Business News)", "📰 **Wall Street Journal**"),
     ("Wired Magazine (Tech News)", "🔌 **Wired**"),
     ("X (Twitter Trends)", "🐦 **X (Twitter)**")
 ], key=lambda x: x[0])
@@ -1020,11 +1010,53 @@ if col_clr.button("Clear All", use_container_width=True):
     st.rerun()
     
 selected_sources = []
-for internal_name, display_name in sources_data:
-    key = f"cb_{internal_name}"
-    val = st.sidebar.checkbox(display_name, key=key)
-    if val:
-        selected_sources.append(internal_name)
+
+thai_sources = {
+    "Google News (Thailand)", "Google News TH (IT)", "Isranews (Thai News)",
+    "JS100 (Traffic & News)", "Krungthep Turakij (Business News)", "Matichon (Thai News)",
+    "Pantip (Thai Trends)", "Spaceth.co (Space News)", "The Standard (Thai News)",
+    "Thairath (Thai News)", "Blognone (IT News)"
+}
+
+with st.sidebar.expander("🇹🇭 ประเทศไทย (Thailand)", expanded=True):
+    col_sel_th, col_clr_th = st.columns(2)
+    if col_sel_th.button("Select All TH", key="sel_th", use_container_width=True):
+        for internal_name, _ in sources_data:
+            if internal_name in thai_sources:
+                st.session_state[f"cb_{internal_name}"] = True
+        st.rerun()
+    if col_clr_th.button("Clear All TH", key="clr_th", use_container_width=True):
+        for internal_name, _ in sources_data:
+            if internal_name in thai_sources:
+                st.session_state[f"cb_{internal_name}"] = False
+        st.rerun()
+        
+    for internal_name, display_name in sources_data:
+        if internal_name in thai_sources:
+            key = f"cb_{internal_name}"
+            val = st.checkbox(display_name, key=key)
+            if val:
+                selected_sources.append(internal_name)
+
+with st.sidebar.expander("🌐 ต่างประเทศ (International)", expanded=True):
+    col_sel_int, col_clr_int = st.columns(2)
+    if col_sel_int.button("Select All INT", key="sel_int", use_container_width=True):
+        for internal_name, _ in sources_data:
+            if internal_name not in thai_sources:
+                st.session_state[f"cb_{internal_name}"] = True
+        st.rerun()
+    if col_clr_int.button("Clear All INT", key="clr_int", use_container_width=True):
+        for internal_name, _ in sources_data:
+            if internal_name not in thai_sources:
+                st.session_state[f"cb_{internal_name}"] = False
+        st.rerun()
+        
+    for internal_name, display_name in sources_data:
+        if internal_name not in thai_sources:
+            key = f"cb_{internal_name}"
+            val = st.checkbox(display_name, key=key)
+            if val:
+                selected_sources.append(internal_name)
 
 # --- FAIL-SAFE REMOVED to allow explicit empty state ---
 # if not selected_sources:
@@ -1186,14 +1218,17 @@ else:
 
     SOURCE_MAPPING = {
         "Reuters (World News)": "Reuters", "Associated Press (AP)": "AP News", "The Information (Tech)": "The Information",
-        "Axios (News)": "Axios", "Traffic Alerts (iTIC/Longdo)": "Traffic Alert", "TikTok Trends": "TikTok",
+        "Axios (News)": "Axios", "TikTok Trends": "TikTok",
         "Threads Trends": "Threads", "Instagram Trends": "Instagram", "Reddit (Global Trends)": "Reddit",
         "Pantip (Thai Trends)": "Pantip", "Google News (Thailand)": "Google News TH", "Google News TH (IT)": "Google News TH (IT)",
+        "Google News (International)": "Google News Int",
         "BBC (Global News)": "BBC News", "CNN (Global News)": "CNN", "Al Jazeera (Global News)": "Al Jazeera",
         "Thairath (Thai News)": "Thairath", "Blognone (IT News)": "Blognone", "The Standard (Thai News)": "The Standard",
         "Krungthep Turakij (Business News)": "Krungthep Turakij", "Spaceth.co (Space News)": "Spaceth.co",
         "Physics.org (Science News)": "Phys.org", "Space.com (Space News)": "Space.com", "MIT Tech Review (Tech News)": "MIT Tech Review",
-        "Wired Magazine (Tech News)": "Wired", "Physics World (Science News)": "Physics World", "X (Twitter)": "X (Twitter)"
+        "Wired Magazine (Tech News)": "Wired", "Physics World (Science News)": "Physics World", "X (Twitter Trends)": "X (Twitter)",
+        "Isranews (Thai News)": "Isranews", "Matichon (Thai News)": "Matichon", "Bloomberg (Business News)": "Bloomberg",
+        "Wall Street Journal (Business News)": "Wall Street Journal", "JS100 (Traffic & News)": "JS100"
     }
     
     allowed_names = [SOURCE_MAPPING.get(src, src) for src in selected_sources]
@@ -1232,12 +1267,13 @@ else:
 
         with col_content:
             source_colors = {
-                "Reuters": "#FF8000", "AP News": "#D2232A", "The Information": "#000000", "Axios": "#005994", "Traffic Alert": "#FF0000",
+                "Reuters": "#FF8000", "AP News": "#D2232A", "The Information": "#000000", "Axios": "#005994",
                 "TikTok": "#EE1D52", "Threads": "#000000", "Instagram": "#C13584", "Reddit": "#FF4500", "Pantip": "#3f3652",
-                "Google News TH": "#4285F4", "Google News TH (IT)": "#FBBC05", "BBC News": "#B80000", "CNN": "#CC0000",
+                "Google News TH": "#4285F4", "Google News TH (IT)": "#FBBC05", "Google News Int": "#1A73E8", "BBC News": "#B80000", "CNN": "#CC0000",
                 "Al Jazeera": "#FF9900", "Thairath": "#009944", "Blognone": "#0EA5E9", "The Standard": "#475569",
                 "Krungthep Turakij": "#1E40AF", "Spaceth.co": "#334155", "Phys.org": "#3B82F6", "Space.com": "#0369A1",
-                "MIT Tech Review": "#A31F34", "Wired": "#111827", "Physics World": "#2563EB", "X (Twitter)": "#000000"
+                "MIT Tech Review": "#A31F34", "Wired": "#111827", "Physics World": "#2563EB", "X (Twitter)": "#000000",
+                "Isranews": "#0F766E", "Matichon": "#4338CA", "Bloomberg": "#0564F2", "Wall Street Journal": "#1F2937", "JS100": "#EA580C"
             }
             bg_color = source_colors.get(item['source'], "#444")
             card_class = "news-card monitored-card" if is_monitored else "news-card"
@@ -1287,6 +1323,13 @@ else:
         # Minimized serialization for Digg Stack
         stack_data = []
         for item in sorted_items:
+            # Dynamically format raw epoch timestamp based on LATEST selected timezone
+            raw_ts = item.get('fetch_timestamp')
+            if raw_ts:
+                formatted_time = format_ts(raw_ts)
+            else:
+                formatted_time = item.get('fetch_time', '--:--:--')
+                
             stack_data.append({
                 "id": item['id'], 
                 "title": item['title'], 
@@ -1296,7 +1339,7 @@ else:
                 "source": item['source'],
                 "is_monitored": item.get('is_monitored', False),
                 "match_color": item.get('match_color', "#FFD700"),
-                "fetch_time": item.get('fetch_time', "--:--:--")
+                "fetch_time": formatted_time
             })
         js_data = json.dumps(stack_data)
 
@@ -1328,7 +1371,6 @@ else:
                     "AP News": "#D2232A",
                     "The Information": "#000000",
                     "Axios": "#005994",
-                    "Traffic Alert": "#FF0000",
                     "TikTok": "#EE1D52",
                     "Threads": "#FFFFFF",
                     "Instagram": "#C13584",
@@ -1336,6 +1378,7 @@ else:
                     "Pantip": "#6366F1",
                     "Google News TH": "#3B82F6",
                     "Google News TH (IT)": "#F59E0B",
+                    "Google News Int": "#1A73E8",
                     "BBC News": "#EF4444",
                     "CNN": "#DC2626",
                     "Al Jazeera": "#F97316",
@@ -1349,7 +1392,12 @@ else:
                     "MIT Tech Review": "#E11D48",
                     "Wired": "#111827",
                     "Physics World": "#2563EB",
-                    "X (Twitter)": "#000000"
+                    "X (Twitter)": "#000000",
+                    "Isranews": "#0F766E",
+                    "Matichon": "#4338CA",
+                    "Bloomberg": "#0564F2",
+                    "Wall Street Journal": "#1F2937",
+                    "JS100": "#EA580C"
                 };
                 
                 let blocks = [];
