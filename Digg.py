@@ -415,7 +415,67 @@ st.markdown("""
             top: 10px !important;
             left: 10px !important;
         }
-    /* 7. Masonry & Sticky Layout */
+    }
+
+    /* =========================================
+       7. ADAPTIVE NAVIGATION (Laptops/Small Screens)
+       ========================================= */
+    @media (max-width: 1400px) {
+        /* Force 11-column navigation block (menu) into a 4-column grid */
+        [data-testid="stHorizontalBlock"]:has(> div:nth-child(11)) {
+            display: grid !important;
+            grid-template-columns: repeat(4, 1fr) !important;
+            gap: 10px !important;
+        }
+        [data-testid="stHorizontalBlock"]:has(> div:nth-child(11)) > div {
+            width: 100% !important;
+            max-width: 100% !important;
+            flex: 1 1 auto !important;
+        }
+
+        /* Word cloud horizontal block layout */
+        [data-testid="stExpander"] [data-testid="stHorizontalBlock"] {
+            flex-wrap: wrap !important;
+            gap: 10px !important;
+            justify-content: flex-start !important;
+        }
+        [data-testid="stExpander"] [data-testid="stHorizontalBlock"] > div {
+            flex: 1 1 18% !important; /* 5 columns roughly */
+            min-width: 100px !important;
+            max-width: 20% !important;
+        }
+
+        [data-testid="stHorizontalBlock"]:has(> div:nth-child(11)) button,
+        [data-testid="stExpander"] button {
+            padding: 8px 4px !important;
+            font-size: 13px !important;
+            height: 45px !important; /* Fixed height for grid alignment */
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+        }
+
+        /* Adjust main news grid to 2 columns on medium screens if it was 3 */
+        [data-testid="stMain"] [data-testid="stHorizontalBlock"]:not([data-testid="stHorizontalBlock"]:has(> div:nth-child(11))) > div {
+            min-width: 40% !important;
+            flex: 1 1 auto !important;
+        }
+    }
+
+    @media (max-width: 768px) {
+        [data-testid="stHorizontalBlock"]:has(> div:nth-child(11)) {
+            grid-template-columns: repeat(3, 1fr) !important; /* 3 columns on mobile */
+        }
+        [data-testid="stHorizontalBlock"]:has(> div:nth-child(11)) > div {
+            width: 100% !important;
+            max-width: 100% !important;
+        }
+        [data-testid="stMain"] [data-testid="stHorizontalBlock"] > div {
+            min-width: 100% !important;
+        }
+    }
+
+    /* 8. Masonry & Sticky Layout */
     .masonry-container {
         column-count: 3;
         column-gap: 15px;
