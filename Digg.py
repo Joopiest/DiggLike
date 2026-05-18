@@ -399,49 +399,97 @@ st.markdown("""
        6. MOBILE OPTIMIZATIONS (@media queries)
        ========================================= */
     @media (max-width: 768px) {
-        /* ลดระยะห่างขอบจอให้เนื้อหาเต็มขึ้น */
+        /* ลดระยะห่างขอบจอให้เนื้อหาเต็มตาขึ้นบนมือถือ */
         .main .block-container {
-            padding-left: 1rem !important;
-            padding-right: 1rem !important;
-            padding-top: 2rem !important;
+            padding-left: 0.5rem !important;
+            padding-right: 0.5rem !important;
+            padding-top: 1.5rem !important;
         }
 
-        /* ปรับหน้าตา Card ข่าวให้เหมาะกับจอแนวตั้ง */
+        /* ปรับหน้าตา Card ข่าวให้เป็นแนวนอนสวยงาม กระชับ และประหยัดพื้นที่แนวตั้ง */
         .news-card {
-            padding: 14px !important;
-            margin-bottom: 12px !important;
-            flex-direction: column !important;
-            align-items: flex-start !important;
-            gap: 12px !important;
+            padding: 10px 12px !important;
+            margin-bottom: 8px !important;
+            flex-direction: row !important;
+            align-items: center !important;
+            gap: 8px !important;
+            border-radius: 12px !important;
         }
 
         .news-content {
             width: 100% !important;
         }
 
-        /* ปรับปุ่มโหวตให้อยู่ในแถวเดียวกันด้านล่าง */
-        .vote-controls {
+        /* ป้องกันไม่ให้คอลัมน์โหวตและข่าวสแต็กแนวตั้งบนมือถือ (จัดเรียงเคียงข้างกันหรูหรา) */
+        [data-testid="stHorizontalBlock"]:has(.score-box) {
             display: flex !important;
             flex-direction: row !important;
+            flex-wrap: nowrap !important;
             align-items: center !important;
-            justify-content: flex-start !important;
-            gap: 20px !important;
-            width: 100% !important;
-            border-top: 1px solid rgba(255,255,255,0.05) !important;
-            padding-top: 10px !important;
+            gap: 8px !important;
+            margin-bottom: 6px !important;
+            background: rgba(255, 255, 255, 0.02) !important;
+            padding: 4px 6px !important;
+            border-radius: 14px !important;
+            border: 1px solid rgba(255, 255, 255, 0.03) !important;
+        }
+
+        /* คอนโทรลคอลัมน์ปุ่มโหวตด้านซ้ายสุดบนมือถือ */
+        [data-testid="stHorizontalBlock"]:has(.score-box) > [data-testid="column"]:nth-child(1) {
+            width: 55px !important;
+            min-width: 55px !important;
+            max-width: 55px !important;
+            flex: 0 0 auto !important;
+            display: flex !important;
+            flex-direction: column !important;
+            align-items: center !important;
+            justify-content: center !important;
+            gap: 2px !important;
+            background: rgba(255, 255, 255, 0.03) !important;
+            border-radius: 10px !important;
+            padding: 4px 2px !important;
+        }
+
+        /* คอนโทรลคอลัมน์เนื้อหาข่าวการ์ดด้านขวาบนมือถือ */
+        [data-testid="stHorizontalBlock"]:has(.score-box) > [data-testid="column"]:nth-child(2) {
+            width: calc(100% - 63px) !important;
+            flex: 1 1 auto !important;
+        }
+
+        /* ปรับสัดส่วนปุ่มกดโหวตบนมือถือให้กดง่ายและได้สัดส่วน */
+        [data-testid="stHorizontalBlock"]:has(.score-box) button {
+            font-size: 18px !important;
+            height: 28px !important;
+            width: 28px !important;
+            min-height: 28px !important;
+            min-width: 28px !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
         }
 
         .score-box {
-            font-size: 18px !important;
+            font-size: 15px !important;
+            line-height: 1 !important;
+            font-weight: 900 !important;
         }
 
-        /* ปรับขนาดหัวข้อข่าว */
+        /* ปรับขนาดหัวข้อข่าวและป้ายคำให้เหมาะกับจอภาพมือถือ */
         .news-title {
-            font-size: 16px !important;
-            line-height: 1.4 !important;
+            font-size: 13px !important;
+            line-height: 1.3 !important;
+        }
+        
+        .source-badge {
+            font-size: 9px !important;
+            padding: 1px 6px !important;
+        }
+        .category-badge {
+            font-size: 9px !important;
+            padding: 1px 6px !important;
         }
 
-        /* ปรับปุ่ม Toggle Sidebar ให้เล็กลงนิดนึงบนมือถือ */
+        /* ตกแต่งปุ่ม Toggle Sidebar 40px ของเราบนมือถือ */
         [data-testid="stSidebarCollapseButton"] button,
         [data-testid="stSidebarCollapseButton"] {
             min-width: 40px !important;
@@ -478,7 +526,7 @@ st.markdown("""
             justify-content: flex-start !important;
         }
         [data-testid="stExpander"] [data-testid="stHorizontalBlock"] > div {
-            flex: 1 1 18% !important; /* 5 columns roughly */
+            flex: 1 1 18% !important;
             min-width: 100px !important;
             max-width: 20% !important;
         }
@@ -487,28 +535,56 @@ st.markdown("""
         [data-testid="stExpander"] button {
             padding: 8px 4px !important;
             font-size: 13px !important;
-            height: 45px !important; /* Fixed height for grid alignment */
+            height: 45px !important;
             display: flex !important;
             align-items: center !important;
             justify-content: center !important;
         }
 
         /* Adjust main news grid to 2 columns on medium screens if it was 3 */
-        [data-testid="stMain"] [data-testid="stHorizontalBlock"]:not([data-testid="stHorizontalBlock"]:has(> div:nth-child(11))) > div {
+        [data-testid="stMain"] [data-testid="stHorizontalBlock"]:not([data-testid="stHorizontalBlock"]:has(> div:nth-child(11))):not([data-testid="stHorizontalBlock"]:has(.score-box)) > div {
             min-width: 40% !important;
             flex: 1 1 auto !important;
         }
     }
 
     @media (max-width: 768px) {
+        /* จัดหมวดหมู่ 11 ปุ่มบนหน้าจอมือถือให้แสดงผลแบบ Grid 3 คอลัมน์สมมาตรพอดีหน้าจอ */
         [data-testid="stHorizontalBlock"]:has(> div:nth-child(11)) {
-            grid-template-columns: repeat(3, 1fr) !important; /* 3 columns on mobile */
+            display: grid !important;
+            grid-template-columns: repeat(3, 1fr) !important;
+            gap: 6px !important;
         }
         [data-testid="stHorizontalBlock"]:has(> div:nth-child(11)) > div {
             width: 100% !important;
             max-width: 100% !important;
         }
-        [data-testid="stMain"] [data-testid="stHorizontalBlock"] > div {
+        [data-testid="stHorizontalBlock"]:has(> div:nth-child(11)) button {
+            padding: 6px 2px !important;
+            font-size: 11px !important;
+            height: 38px !important;
+            border-radius: 8px !important;
+        }
+
+        /* จัดปุ่มในแถวดาวกระจายของ Word Cloud ให้เป็น 3 คอลัมน์ ไม่ต่อยาวลงแนวตั้ง */
+        [data-testid="stExpander"] [data-testid="stHorizontalBlock"] {
+            display: grid !important;
+            grid-template-columns: repeat(3, 1fr) !important;
+            gap: 6px !important;
+        }
+        [data-testid="stExpander"] [data-testid="stHorizontalBlock"] > div {
+            width: 100% !important;
+            max-width: 100% !important;
+            flex: 1 1 auto !important;
+        }
+        [data-testid="stExpander"] button {
+            padding: 6px 2px !important;
+            font-size: 11px !important;
+            height: 36px !important;
+            border-radius: 8px !important;
+        }
+
+        [data-testid="stMain"] [data-testid="stHorizontalBlock"]:not([data-testid="stHorizontalBlock"]:has(> div:nth-child(11))):not([data-testid="stHorizontalBlock"]:has(.score-box)) > div {
             min-width: 100% !important;
         }
     }
@@ -1548,7 +1624,7 @@ else:
                 let hoveredCol = -1;
                 
                 class Block {
-                    constructor(data, colWidth, floorY) {
+                    constructor(data, colWidth, isMobile) {
                         this.data = data;
                         this.category = data.category;
                         this.source = data.source || "Unknown";
@@ -1561,11 +1637,24 @@ else:
                         
                         let score = data.base_score || data.score || 100;
                         this.height = Math.max(35, Math.min(200, 35 + Math.floor(score / 5)));
-                        this.width = colWidth - 10;
                         
-                        // Start off screen (above camera for its specific column)
-                        this.x = this.col * colWidth + 5;
-                        this.y = -this.height - Math.max(0, cameraY[this.col] || 0); 
+                        if (isMobile) {
+                            this.row = this.col < 4 ? 0 : 1;
+                            this.localCol = this.col % 4;
+                            this.width = (canvas.width / 4) - 10;
+                            this.x = this.localCol * (canvas.width / 4) + 5;
+                            this.floorY = this.row === 0 ? 330 : 710;
+                            // Start offscreen for the specific row
+                            let startYOffset = this.row === 0 ? 0 : 370;
+                            this.y = startYOffset - this.height - Math.max(0, cameraY[this.col] || 0); 
+                        } else {
+                            this.row = 0;
+                            this.localCol = this.col;
+                            this.width = colWidth - 10;
+                            this.x = this.localCol * colWidth + 5;
+                            this.floorY = 710;
+                            this.y = -this.height - Math.max(0, cameraY[this.col] || 0); 
+                        }
                         
                         this.targetY = columnHeights[this.col] - this.height;
                         columnHeights[this.col] = this.targetY;
@@ -1584,15 +1673,32 @@ else:
                                 spawnSparks(this.x + this.width / 2, this.y + this.height, this.color, 15);
                             }
                         }
-                        }
+                    }
 
-                        draw() {
+                    draw() {
                         let currentCamY = cameraY[this.col] || 0;
                         let drawY = this.y + currentCamY;
-                        if (drawY + this.height < 0 || drawY > canvas.height) return; // Culling
+                        
+                        let isMobile = canvas.width < 600;
+                        let startY = 0;
+                        let endY = 750;
+                        if (isMobile) {
+                            startY = this.row === 0 ? 0 : 370;
+                            endY = this.row === 0 ? 330 : 710;
+                        } else {
+                            endY = 710;
+                        }
+
+                        if (drawY + this.height < startY || drawY > endY) return; // Culling
 
                         // 1. Shadow & Glass Glow
                         ctx.save();
+                        
+                        // Clip rendering to keep Row 0 and Row 1 blocks strictly in their respective viewports!
+                        ctx.beginPath();
+                        ctx.rect(0, startY, canvas.width, endY - startY);
+                        ctx.clip();
+                        
                         ctx.shadowColor = "rgba(0, 0, 0, 0.5)";
                         ctx.shadowBlur = 12;
                         ctx.shadowOffsetY = 6;
@@ -1679,15 +1785,10 @@ else:
                 
                 function spawnBlock() {
                     if (initialized && queue.length > 0) {
-                        let COL_WIDTH = canvas.width / CATEGORIES.length;
-                        let FLOOR_Y = canvas.height - 40;
-                        let block = new Block(queue.shift(), COL_WIDTH, FLOOR_Y);
+                        let isMobile = canvas.width < 600;
+                        let COL_WIDTH = canvas.width / (isMobile ? 4 : 8);
+                        let block = new Block(queue.shift(), COL_WIDTH, isMobile);
                         blocks.push(block);
-                        
-                        let col = block.col;
-                        let maxScroll = Math.max(0, 100 - columnHeights[col]);
-                        // Disable auto-panning completely to prevent columns from visually "going up" on their own
-                        // The user can still scroll manually with the mouse wheel or click the label to snap.
                     }
                 }
                 
@@ -1701,11 +1802,16 @@ else:
                         return;
                     }
                     queue = [...rawData];
-                    let COLUMNS = CATEGORIES.length;
-                    let FLOOR_Y = canvas.height - 40;
-                    let COL_WIDTH = canvas.width / COLUMNS;
+                    let COLUMNS = 8;
+                    let isMobile = canvas.width < 600;
+                    let COL_WIDTH = canvas.width / (isMobile ? 4 : 8);
                     
-                    columnHeights = new Array(COLUMNS).fill(FLOOR_Y);
+                    columnHeights = new Array(COLUMNS).fill(710);
+                    if (isMobile) {
+                        for (let i = 0; i < 4; i++) columnHeights[i] = 330;
+                        for (let i = 4; i < 8; i++) columnHeights[i] = 710;
+                    }
+                    
                     cameraY = new Array(COLUMNS).fill(0);
                     targetCameraY = new Array(COLUMNS).fill(0);
                     
@@ -1720,7 +1826,7 @@ else:
                     
                     for (let stored of validStored) {
                         let data = rawData.find(r => r.id === stored.id);
-                        let block = new Block(data, COL_WIDTH, FLOOR_Y);
+                        let block = new Block(data, COL_WIDTH, isMobile);
                         block.y = stored.y;
                         block.stopped = false; 
                         blocks.push(block);
@@ -1734,14 +1840,109 @@ else:
                 setInterval(spawnBlock, 600);
                 
                 canvas.addEventListener('wheel', (e) => {
-                    if (initialized && hoveredCol !== -1) {
-                        e.preventDefault(); 
-                        targetCameraY[hoveredCol] += e.deltaY * 0.5; 
-                        let maxScroll = Math.max(0, 100 - columnHeights[hoveredCol]);
-                        if (targetCameraY[hoveredCol] < 0) targetCameraY[hoveredCol] = 0;
-                        if (targetCameraY[hoveredCol] > maxScroll) targetCameraY[hoveredCol] = maxScroll;
+                    if (!initialized || hoveredCol === -1) return;
+                    
+                    let isMobile = canvas.width < 600;
+                    let maxScroll = 0;
+                    let colHeight = columnHeights[hoveredCol];
+                    if (isMobile) {
+                        let row = hoveredCol < 4 ? 0 : 1;
+                        if (row === 0) {
+                            maxScroll = Math.max(0, 60 - colHeight);
+                        } else {
+                            maxScroll = Math.max(0, 430 - colHeight);
+                        }
+                    } else {
+                        maxScroll = Math.max(0, 100 - colHeight);
+                    }
+                    
+                    if (maxScroll > 0) {
+                        let prevCameraY = targetCameraY[hoveredCol];
+                        let nextCameraY = prevCameraY + e.deltaY * 0.8; // Faster, smoother scroll
+                        if (nextCameraY < 0) nextCameraY = 0;
+                        if (nextCameraY > maxScroll) nextCameraY = maxScroll;
+                        
+                        // Intelligent Scroll Chaining: only preventDefault if we are actively scrolling the column content.
+                        // If we are at the top and scrolling up, or at the bottom and scrolling down, let the page scroll!
+                        let reachedTop = (e.deltaY < 0 && prevCameraY === 0);
+                        let reachedBottom = (e.deltaY > 0 && prevCameraY === maxScroll);
+                        
+                        if (!reachedTop && !reachedBottom) {
+                            e.preventDefault();
+                            targetCameraY[hoveredCol] = nextCameraY;
+                        }
                     }
                 }, { passive: false });
+                
+                // --- Mobile Touch Swipe Gestures to scroll columns ---
+                let touchStartY = 0;
+                let touchStartCol = -1;
+                let touchStartCameraY = 0;
+                
+                canvas.addEventListener('touchstart', (e) => {
+                    if (!initialized) return;
+                    const rect = canvas.getBoundingClientRect();
+                    let touch = e.touches[0];
+                    let tx = (touch.clientX - rect.left) * (canvas.width / rect.width);
+                    let ty = (touch.clientY - rect.top) * (canvas.height / rect.height);
+                    
+                    touchStartY = touch.clientY;
+                    
+                    let isMobile = canvas.width < 600;
+                    if (isMobile) {
+                        let col = Math.floor(tx / (canvas.width / 4));
+                        col = Math.max(0, Math.min(3, col));
+                        let row = ty < 350 ? 0 : 1;
+                        touchStartCol = row * 4 + col;
+                    } else {
+                        let COL_WIDTH = canvas.width / 8;
+                        touchStartCol = Math.floor(tx / COL_WIDTH);
+                    }
+                    if (touchStartCol >= CATEGORIES.length) touchStartCol = CATEGORIES.length - 1;
+                    if (touchStartCol < 0) touchStartCol = 0;
+                    
+                    touchStartCameraY = targetCameraY[touchStartCol] || 0;
+                }, { passive: true });
+                
+                canvas.addEventListener('touchmove', (e) => {
+                    if (!initialized || touchStartCol === -1) return;
+                    let touch = e.touches[0];
+                    let deltaY = touch.clientY - touchStartY; // positive when swiping down, negative when swiping up
+                    
+                    let colHeight = columnHeights[touchStartCol];
+                    let isMobile = canvas.width < 600;
+                    let maxScroll = 0;
+                    if (isMobile) {
+                        let row = touchStartCol < 4 ? 0 : 1;
+                        if (row === 0) {
+                            maxScroll = Math.max(0, 60 - colHeight);
+                        } else {
+                            maxScroll = Math.max(0, 430 - colHeight);
+                        }
+                    } else {
+                        maxScroll = Math.max(0, 100 - colHeight);
+                    }
+                    
+                    if (maxScroll > 0) {
+                        let prevCameraY = targetCameraY[touchStartCol];
+                        // Swiping finger UP (deltaY < 0) scrolls down (camera Y increases)
+                        let nextCameraY = touchStartCameraY - deltaY * 1.5; 
+                        if (nextCameraY < 0) nextCameraY = 0;
+                        if (nextCameraY > maxScroll) nextCameraY = maxScroll;
+                        
+                        let reachedTop = (deltaY > 0 && prevCameraY === 0);
+                        let reachedBottom = (deltaY < 0 && prevCameraY === maxScroll);
+                        
+                        if (!reachedTop && !reachedBottom) {
+                            if (e.cancelable) e.preventDefault();
+                            targetCameraY[touchStartCol] = nextCameraY;
+                        }
+                    }
+                }, { passive: false });
+                
+                canvas.addEventListener('touchend', () => {
+                    touchStartCol = -1;
+                }, { passive: true });
                 
                 let hoveredBlockUrl = null;
                 let hoveredBlockSource = null;
@@ -1762,13 +1963,27 @@ else:
                     canvas.style.cursor = 'default';
                     
                     if (initialized) {
-                        let COL_WIDTH = canvas.width / CATEGORIES.length;
-                        hoveredCol = Math.floor(mouseX / COL_WIDTH);
+                        let isMobile = canvas.width < 600;
+                        if (isMobile) {
+                            let col = Math.floor(mouseX / (canvas.width / 4));
+                            col = Math.max(0, Math.min(3, col));
+                            let row = mouseY < 350 ? 0 : 1;
+                            hoveredCol = row * 4 + col;
+                        } else {
+                            let COL_WIDTH = canvas.width / 8;
+                            hoveredCol = Math.floor(mouseX / COL_WIDTH);
+                        }
                         if (hoveredCol >= CATEGORIES.length) hoveredCol = CATEGORIES.length - 1;
                         if (hoveredCol < 0) hoveredCol = 0;
                     }
                     
-                    if (mouseY > canvas.height - 40) return;
+                    // Prevent hover over footer area on desktop and row floors on mobile
+                    let isMobile = canvas.width < 600;
+                    if (isMobile) {
+                        if ((mouseY > 330 && mouseY < 370) || mouseY > 710) return;
+                    } else {
+                        if (mouseY > 710) return;
+                    }
                     
                     for (let block of blocks) {
                         let currentCamY = cameraY[block.col] || 0;
@@ -1776,12 +1991,25 @@ else:
                         
                         if (mouseX >= block.x && mouseX <= block.x + block.width &&
                             worldY >= block.y && worldY <= block.y + block.height) {
-                            hoveredBlockUrl = block.data.url;
-                            hoveredBlockSource = block.source;
-                            hoveredBlockTitle = block.data.title;
-                            hoveredBlockFetchTime = block.data.fetch_time || '--:--:--';
-                            canvas.style.cursor = 'pointer';
-                            break;
+                            
+                            let startY = 0;
+                            let endY = 750;
+                            if (isMobile) {
+                                startY = block.row === 0 ? 0 : 370;
+                                endY = block.row === 0 ? 330 : 710;
+                            } else {
+                                endY = 710;
+                            }
+                            
+                            let drawY = block.y + currentCamY;
+                            if (drawY >= startY && drawY + block.height <= endY) {
+                                hoveredBlockUrl = block.data.url;
+                                hoveredBlockSource = block.source;
+                                hoveredBlockTitle = block.data.title;
+                                hoveredBlockFetchTime = block.data.fetch_time || '--:--:--';
+                                canvas.style.cursor = 'pointer';
+                                break;
+                            }
                         }
                     }
                 });
@@ -1789,12 +2017,21 @@ else:
                 canvas.addEventListener('click', () => {
                     if (hoveredBlockUrl) {
                         window.open(hoveredBlockUrl, '_blank');
-                    } else if (hoveredCol !== -1 && mouseY > canvas.height - 40) {
-                        let maxScroll = Math.max(0, 100 - columnHeights[hoveredCol]);
-                        if (targetCameraY[hoveredCol] > maxScroll / 2) {
-                            targetCameraY[hoveredCol] = 0;
+                    } else if (hoveredCol !== -1) {
+                        let isMobile = canvas.width < 600;
+                        let isClickingFloor = false;
+                        if (isMobile) {
+                            isClickingFloor = (mouseY > 330 && mouseY < 370) || (mouseY > 710);
                         } else {
-                            targetCameraY[hoveredCol] = maxScroll; 
+                            isClickingFloor = (mouseY > 710);
+                        }
+                        if (isClickingFloor) {
+                            let maxScroll = Math.max(0, 100 - columnHeights[hoveredCol]);
+                            if (targetCameraY[hoveredCol] > maxScroll / 2) {
+                                targetCameraY[hoveredCol] = 0;
+                            } else {
+                                targetCameraY[hoveredCol] = maxScroll; 
+                            }
                         }
                     }
                 });
@@ -1803,9 +2040,9 @@ else:
                     ctx.fillStyle = "#1E1E1E";
                     ctx.fillRect(0, 0, canvas.width, canvas.height);
                     
-                    let COLUMNS = CATEGORIES.length;
-                    let COL_WIDTH = canvas.width / COLUMNS;
-                    let FLOOR_Y = canvas.height - 40;
+                    let isMobile = canvas.width < 600;
+                    let COLUMNS = 8;
+                    let COL_WIDTH = canvas.width / (isMobile ? 4 : 8);
                     
                     if (rawData.length === 0) {
                         ctx.fillStyle = "rgba(255, 255, 255, 0.4)";
@@ -1837,7 +2074,7 @@ else:
                         block.draw();
                     }
 
-                    // --- NEW: Update and Draw Particles (Sparks) ---
+                    // --- Update and Draw Particles (Sparks) ---
                     for (let i = particles.length - 1; i >= 0; i--) {
                         particles[i].update();
                         particles[i].draw();
@@ -1851,25 +2088,74 @@ else:
                         }))));
                     }
                     
-                    // Draw Sticky Footer
-                    ctx.fillStyle = "#1E1E1E";
-                    ctx.fillRect(0, FLOOR_Y, canvas.width, canvas.height - FLOOR_Y);
-                    
-                    ctx.strokeStyle = "#555";
-                    ctx.lineWidth = 2;
-                    ctx.beginPath();
-                    ctx.moveTo(0, FLOOR_Y);
-                    ctx.lineTo(canvas.width, FLOOR_Y);
-                    ctx.stroke();
-                    
-                    // Draw Labels
-                    ctx.fillStyle = "#CCC";
-                    ctx.font = "bold 14px sans-serif";
-                    ctx.textAlign = "center";
-                    ctx.textBaseline = "top";
-                    for(let i=0; i<CATEGORIES.length; i++) {
-                        let label = CATEGORIES[i].split(" (")[0];
-                        ctx.fillText(label, i * COL_WIDTH + COL_WIDTH/2, FLOOR_Y + 10);
+                    // Draw Sticky Footer (or Footers on mobile)
+                    if (isMobile) {
+                        let colW = canvas.width / 4;
+                        
+                        // --- ROW 0 FLOOR & LABELS ---
+                        ctx.fillStyle = "#1E1E1E";
+                        ctx.fillRect(0, 330, canvas.width, 40);
+                        
+                        ctx.strokeStyle = "#555";
+                        ctx.lineWidth = 2;
+                        ctx.beginPath();
+                        ctx.moveTo(0, 330);
+                        ctx.lineTo(canvas.width, 330);
+                        ctx.stroke();
+                        
+                        ctx.fillStyle = "#CCC";
+                        ctx.font = "bold 11px sans-serif";
+                        ctx.textAlign = "center";
+                        ctx.textBaseline = "top";
+                        for(let i=0; i<4; i++) {
+                            let label = CATEGORIES[i].split(" (")[0];
+                            ctx.fillText(label, i * colW + colW/2, 330 + 10);
+                        }
+
+                        // --- ROW 1 FLOOR & LABELS ---
+                        ctx.fillStyle = "#1E1E1E";
+                        ctx.fillRect(0, 710, canvas.width, 40);
+                        
+                        ctx.strokeStyle = "#555";
+                        ctx.lineWidth = 2;
+                        ctx.beginPath();
+                        ctx.moveTo(0, 710);
+                        ctx.lineTo(canvas.width, 710);
+                        ctx.stroke();
+                        
+                        ctx.fillStyle = "#CCC";
+                        ctx.font = "bold 11px sans-serif";
+                        ctx.textAlign = "center";
+                        ctx.textBaseline = "top";
+                        for(let i=4; i<8; i++) {
+                            let label = CATEGORIES[i].split(" (")[0];
+                            ctx.fillText(label, (i - 4) * colW + colW/2, 710 + 10);
+                        }
+                        
+                        // Draw a dividing line between Row 0 footer and Row 1 top
+                        ctx.fillStyle = "#121212";
+                        ctx.fillRect(0, 370, canvas.width, 5); // visual separator
+                    } else {
+                        // Desktop: Single Floor
+                        let FLOOR_Y = 710;
+                        ctx.fillStyle = "#1E1E1E";
+                        ctx.fillRect(0, FLOOR_Y, canvas.width, canvas.height - FLOOR_Y);
+                        
+                        ctx.strokeStyle = "#555";
+                        ctx.lineWidth = 2;
+                        ctx.beginPath();
+                        ctx.moveTo(0, FLOOR_Y);
+                        ctx.lineTo(canvas.width, FLOOR_Y);
+                        ctx.stroke();
+                        
+                        ctx.fillStyle = "#CCC";
+                        ctx.font = "bold 14px sans-serif";
+                        ctx.textAlign = "center";
+                        ctx.textBaseline = "top";
+                        for(let i=0; i<CATEGORIES.length; i++) {
+                            let label = CATEGORIES[i].split(" (")[0];
+                            ctx.fillText(label, i * COL_WIDTH + COL_WIDTH/2, FLOOR_Y + 10);
+                        }
                     }
                     
                     // Draw Hover Tooltip
