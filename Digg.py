@@ -171,87 +171,120 @@ st.markdown("""
 
     /* 2.1 ซ่อน SVG เดิมของ Streamlit ถาวร */
     [data-testid="stSidebarCollapseButton"] svg,
-    [data-testid="collapsedControl"] svg {
+    button[data-testid="stExpandSidebarButton"] svg {
         display: none !important;
     }
 
-    /* 2.2 ปุ่ม "ซ่อน" (แสดงอยู่ข้างในตอนกาง Sidebar) */
+    /* เคลียร์กรอบนอกของปุ่ม Collapse (เมื่อกาง Sidebar) เพื่อไม่ให้เกิดวงกลมซ้อน */
     [data-testid="stSidebarCollapseButton"] {
+        background: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
         display: flex !important;
         align-items: center !important;
         justify-content: center !important;
-        background-color: #1E293B !important;
-        border: 2px solid #FFFFFF !important;
-        border-radius: 50% !important;
-        min-width: 46px !important;
-        min-height: 46px !important;
-        position: relative !important;
-        transition: all 0.3s ease !important;
-        cursor: pointer !important;
+        min-width: 40px !important;
+        min-height: 40px !important;
     }
 
-    /* 2.3 ปุ่ม "แสดง" (Wrapper ตัวนอกที่ซ่อนอยู่)
-       **แก้จุดบอด:** บังคับโชว์ 100% และห้ามเลื่อนตกจอ แต่ไม่ฝืน display */
-    [data-testid="collapsedControl"] {
-        opacity: 1 !important;           /* สู้กับ Streamlit ที่ชอบ Fade เป็น 0 */
-        transform: none !important;      /* สู้กับ Streamlit ที่ชอบดึงปุ่มตกขอบจอ */
-        background-color: #FF4500 !important; /* สีส้มแดง */
-        border: 2px solid #FFFFFF !important;
+    /* 2.2 ตกแต่งปุ่ม Collapse จริงวงใน (บางเบา สไตล์พรีเมียม 1px) */
+    [data-testid="stSidebarCollapseButton"] button {
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        background-color: #1E293B !important; /* สีน้ำเงินสเลทเข้ม */
+        border: 1px solid rgba(255, 255, 255, 0.4) !important; /* เส้นขอบขาวบางพรีเมียม */
         border-radius: 50% !important;
-        width: 46px !important;
-        height: 46px !important;
+        width: 40px !important;
+        height: 40px !important;
+        min-width: 40px !important;
+        min-height: 40px !important;
+        position: relative !important;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+        cursor: pointer !important;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3) !important;
+        padding: 0 !important;
+        margin: 0 !important;
+    }
+
+    /* เคลียร์กรอบนอกของปุ่ม Expand (เมื่อหุบ Sidebar) เพื่อไม่ให้เกิดวงกลมซ้อน */
+    div[data-testid="stSidebarCollapsedControl"] {
+        background: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
+        width: auto !important;
+        height: auto !important;
+    }
+
+    /* 2.3 ตกแต่งปุ่ม Expand จริง (สีส้มแดงนีออนเจิดจ้า 1px ขนาด 40px) */
+    button[data-testid="stExpandSidebarButton"] {
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        background-color: #FF4500 !important; /* สีส้มแดง */
+        border: 1px solid rgba(255, 255, 255, 0.6) !important; /* เส้นขอบบางเฉียบ */
+        border-radius: 50% !important;
+        width: 40px !important;
+        height: 40px !important;
+        min-width: 40px !important;
+        min-height: 40px !important;
         position: fixed !important;
         top: 15px !important;
         left: 15px !important;
         z-index: 999999 !important;
-        box-shadow: 0 0 20px rgba(255, 69, 0, 0.5) !important;
-        transition: all 0.3s ease !important;
+        box-shadow: 0 0 15px rgba(255, 69, 0, 0.4) !important;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
         cursor: pointer !important;
+        opacity: 1 !important;
+        visibility: visible !important;
+        transform: none !important;
+        padding: 0 !important;
+        margin: 0 !important;
     }
 
-    /* ล้างค่าปุ่มใสๆ ที่ Streamlit ยัดไว้ข้างใน เพื่อไม่ให้บล็อกการคลิก */
-    [data-testid="collapsedControl"] button {
-        background: transparent !important;
-        border: none !important;
-        width: 100% !important;
-        height: 100% !important;
-    }
-
-    /* 2.4 ลูกศร "ซ่อน" (ชี้ซ้าย) */
-    [data-testid="stSidebarCollapseButton"]::after {
+    /* 2.4 ลูกศร "ซ่อน" (ชี้ซ้าย - จัดตำแหน่งกึ่งกลางเชิงทัศนศาสตร์อย่างสมบูรณ์แบบ) */
+    [data-testid="stSidebarCollapseButton"] button::after {
         content: "«" !important;
         position: absolute !important;
         color: #FFFFFF !important;
-        font-size: 28px !important;
-        font-weight: 900 !important;
-        font-family: sans-serif !important;
-        top: 50% !important;
+        font-size: 22px !important; /* ขนาดพอดีคำ ไม่หนาเทอะทะ */
+        font-weight: 700 !important; /* ความหนากำลังดี */
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+        top: 41% !important; /* ปรับลดลงมา 5px เพื่อความสมดุลเชิงทัศนศาสตร์อย่างสมบูรณ์แบบ */
         left: 50% !important;
         transform: translate(-50%, -50%) !important;
         pointer-events: none !important;
+        line-height: 1 !important;
     }
 
-    /* 2.5 ลูกศร "แสดง" (ชี้ขวา) */
-    [data-testid="collapsedControl"]::after {
+    /* 2.5 ลูกศร "แสดง" (ชี้ขวา - จัดตำแหน่งกึ่งกลางเชิงทัศนศาสตร์อย่างสมบูรณ์แบบ) */
+    button[data-testid="stExpandSidebarButton"]::after {
         content: "»" !important;
         position: absolute !important;
         color: #FFFFFF !important;
-        font-size: 28px !important;
-        font-weight: 900 !important;
-        font-family: sans-serif !important;
-        top: 50% !important;
+        font-size: 22px !important;
+        font-weight: 700 !important;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+        top: 41% !important; /* ปรับลดลงมา 5px เช่นกัน */
         left: 50% !important;
         transform: translate(-50%, -50%) !important;
         pointer-events: none !important;
+        line-height: 1 !important;
     }
 
-    /* 2.6 Hover Effects */
-    [data-testid="stSidebarCollapseButton"]:hover,
-    [data-testid="collapsedControl"]:hover {
-        background-color: #3B82F6 !important; /* เปลี่ยนเป็นสีฟ้าเมื่อชี้ */
+    /* 2.6 Hover Effects (ขยายตัวแบบสมูท 10% พร้อมไฟนีออนฟ้าหรูหรา) */
+    [data-testid="stSidebarCollapseButton"] button:hover {
+        background-color: #3B82F6 !important; /* สีน้ำเงินฟ้านีออน */
         border-color: #FFFFFF !important;
-        transform: scale(1.15) !important;
-        box-shadow: 0 0 15px rgba(59, 130, 246, 0.9) !important;
+        transform: scale(1.1) !important;
+        box-shadow: 0 0 15px rgba(59, 130, 246, 0.6) !important;
+    }
+
+    button[data-testid="stExpandSidebarButton"]:hover {
+        background-color: #3B82F6 !important;
+        border-color: #FFFFFF !important;
+        transform: scale(1.1) !important;
+        box-shadow: 0 0 15px rgba(59, 130, 246, 0.6) !important;
     }
 
     /* 3. Top-Right Menu Fix (Targeting ONLY the App Menu) */
@@ -409,7 +442,12 @@ st.markdown("""
         }
 
         /* ปรับปุ่ม Toggle Sidebar ให้เล็กลงนิดนึงบนมือถือ */
-        [data-testid="collapsedControl"] {
+        [data-testid="stSidebarCollapseButton"] button,
+        [data-testid="stSidebarCollapseButton"] {
+            min-width: 40px !important;
+            min-height: 40px !important;
+        }
+        button[data-testid="stExpandSidebarButton"] {
             width: 40px !important;
             height: 40px !important;
             top: 10px !important;
