@@ -1410,7 +1410,7 @@ else:
         <head>
             <style>
                 body { margin: 0; background-color: #1E1E1E; color: white; font-family: sans-serif; overflow: hidden; }
-                canvas { display: block; width: 100%; height: 600px; }
+                canvas { display: block; width: 100%; height: 750px; }
             </style>
         </head>
         <body>
@@ -1421,7 +1421,7 @@ else:
                 
                 // Ensure canvas matches iframe size
                 canvas.width = window.innerWidth;
-                canvas.height = 600; 
+                canvas.height = 750; 
                 let rawData = []; // Populated by Python
                 let isSystemRunning = false; // Populated by Python
                 
@@ -1943,7 +1943,7 @@ else:
         # Inject data and state
         processed_html = html_code.replace('let rawData = [];', f'let rawData = {js_data};')
         processed_html = processed_html.replace('let isSystemRunning = false;', f'let isSystemRunning = {"true" if st.session_state.get("running_state", False) else "false"};')
-        components.html(processed_html, height=600)
+        components.html(processed_html, height=750)
     else:
         cat_items = [item for item in sorted_items if item['category'] == active_tab]
         if not cat_items:
