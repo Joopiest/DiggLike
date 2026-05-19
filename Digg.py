@@ -1724,6 +1724,12 @@ if enable_auto:
         # 1. The Slider
         auto_refresh_interval = st.slider("Interval (Minutes)", min_value=1, max_value=60, key="refresh_interval_slider")
         
+        # Save interval to file to persist across javascript reloads
+        try:
+            with open(os.path.join(os.path.dirname(__file__), 'refresh_interval.txt'), 'w') as f:
+                f.write(str(auto_refresh_interval))
+        except: pass
+        
         # 2. The Status Box (Only if system is running)
         if st.session_state.get('running_state', False):
             last_fetch = st.session_state.get('last_fetch_time', 0)
