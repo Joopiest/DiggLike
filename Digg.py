@@ -10,6 +10,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 import streamlit.components.v1 as components
 import os
 import re
+import calendar
 from datetime import datetime, timezone, timedelta
 try:
     from wordcloud import WordCloud
@@ -24,6 +25,28 @@ except ImportError:
     # Fallback if libraries are not installed yet
     word_tokenize = lambda x: x.split()
     thai_stopwords = lambda: set()
+
+# --- Date Parsing & Formatting Helpers ---
+def parse_rss_time(entry):
+    struct_time = entry.get('published_parsed') or entry.get('updated_parsed')
+    if struct_time:
+        try:
+            return calendar.timegm(struct_time)
+        except:
+            pass
+    return time.time()
+
+def format_relative_time(pub_timestamp):
+    diff = time.time() - pub_timestamp
+    if diff < 0:
+        return "just now"
+    if diff < 60:
+        return f"{int(diff)}s ago"
+    if diff < 3600:
+        return f"{int(diff // 60)}m ago"
+    if diff < 86400:
+        return f"{int(diff // 3600)}h ago"
+    return f"{int(diff // 86400)}d ago"
 
 # --- Global Thread Synchronization ---
 STATE_LOCK = threading.Lock()
@@ -134,6 +157,26 @@ def get_cached_global_votes():
             pass
     return votes
 
+@st.cache_data(ttl=60)
+def get_archived_watchlist_items():
+    """Fetches permanently archived watchlist articles from Firestore with performance limits."""
+    items = []
+    if 'db' in globals() and db:
+        try:
+            # Bounded fetch to prevent full database scan issues
+            docs = db.collection('watchlist_archive').limit(100).stream()
+            for doc in docs:
+                data = doc.to_dict()
+                # Ensure is_monitored is set to True so keyword highlights apply
+                data['is_monitored'] = True
+                items.append(data)
+            
+            # Sort descending in memory by archived time or pub time
+            items = sorted(items, key=lambda x: x.get('archived_at', x.get('pub_timestamp', 0)), reverse=True)
+        except:
+            pass
+    return items
+
 # --- Background Daemon System Globals ---
 LATEST_NEWS = []
 SEEN_IDS = set()
@@ -144,7 +187,8 @@ def get_bg_config():
         "interval_minutes": 0,
         "sources": [],
         "last_fetch_time": 0,
-        "running": False
+        "running": False,
+        "thread_started": False
     }
 
 BG_CONFIG = get_bg_config()
@@ -706,10 +750,36 @@ def check_keyword_match(keyword, text_lower):
         # English: Word boundary check
         return re.search(rf'\b{re.escape(keyword)}\b', text_lower, re.I) is not None
 
+def async_archive_to_firebase(item, word):
+    """Spawns a daemon thread to write a matched article to Firestore asynchronously."""
+    def run():
+        if 'db' in globals() and db:
+            try:
+                db_id = get_db_id(item['id'])
+                db.collection('watchlist_archive').document(db_id).set({
+                    "id": item['id'],
+                    "title": item['title'],
+                    "url": item['url'],
+                    "source": item['source'],
+                    "category": item['category'],
+                    "pub_timestamp": item['pub_timestamp'],
+                    "fetch_timestamp": item['fetch_timestamp'],
+                    "archived_at": time.time(),
+                    "matched_word": word,
+                    "base_score": item.get('base_score', 100)
+                }, merge=True)
+            except:
+                pass
+    import threading
+    threading.Thread(target=run, daemon=True).start()
+
 def enrich_item(item):
     """Adds category, watchlist metadata, and fetch time to an item once."""
     title_lower = item['title'].lower()
     item['category'] = assign_topic_category(title_lower, item.get('category', 'General'))
+    
+    # Ensure pub_timestamp is set
+    item['pub_timestamp'] = item.get('pub_timestamp', time.time())
     
     # Store raw epoch timestamp for dynamic UI timezone conversion
     item['fetch_timestamp'] = time.time()
@@ -733,6 +803,9 @@ def enrich_item(item):
         if check_keyword_match(word, title_lower):
             item['is_monitored'] = True
             item['match_color'] = kw_colors.get(word, "#FFD700")
+            
+            # --- Permanent Firebase Archiver (Asynchronous) ---
+            async_archive_to_firebase(item, word)
             break
     return item
 
@@ -752,7 +825,8 @@ def fetch_reddit():
                 "url": f"https://www.reddit.com{post['permalink']}",
                 "source": "Reddit",
                 "base_score": post['score'],
-                "category": "General" # Initial
+                "category": "General", # Initial
+                "pub_timestamp": post.get('created_utc', time.time())
             }
             items.append(enrich_item(item))
         return items
@@ -778,7 +852,8 @@ def fetch_rss(feed_url, source_name, category):
                 "url": entry.link,
                 "source": source_name,
                 "base_score": base_score,
-                "category": category
+                "category": category,
+                "pub_timestamp": parse_rss_time(entry)
             }
             items.append(enrich_item(item))
         return items
@@ -804,7 +879,8 @@ def fetch_pantip():
                     "url": href if href.startswith('http') else f"https://pantip.com{href}",
                     "source": "Pantip",
                     "base_score": 250,
-                    "category": "General"
+                    "category": "General",
+                    "pub_timestamp": time.time()
                 }
                 items.append(enrich_item(item))
                 added_urls.add(href)
@@ -849,7 +925,8 @@ def fetch_nitter(path, source_name, category):
                             "url": entry.link,
                             "source": source_name,
                             "base_score": base_score,
-                            "category": category
+                            "category": category,
+                            "pub_timestamp": parse_rss_time(entry)
                         }
                         items.append(enrich_item(item))
                     return items
@@ -956,9 +1033,9 @@ def bg_fetch_loop():
         time.sleep(10)
 
 
-if 'bg_fetcher_started' not in st.session_state:
+if not BG_CONFIG.get("thread_started", False):
     threading.Thread(target=bg_fetch_loop, daemon=True).start()
-    st.session_state.bg_fetcher_started = True
+    BG_CONFIG["thread_started"] = True
 
 # --- UI Layout ---
 
@@ -1126,6 +1203,28 @@ if 'cb_initialized' not in st.session_state:
     for internal_name, _ in sources_data:
         st.session_state[f"cb_{internal_name}"] = internal_name in saved
     st.session_state.monitored_keywords = load_monitored_keywords()
+    
+    # Load date filter settings
+    try:
+        date_filter_path = os.path.join(os.path.dirname(__file__), 'date_filter_enabled.txt')
+        if os.path.exists(date_filter_path):
+            with open(date_filter_path, 'r') as f:
+                st.session_state.enable_date_filter_toggle = f.read().strip() == 'True'
+        else:
+            st.session_state.enable_date_filter_toggle = False
+    except:
+        st.session_state.enable_date_filter_toggle = False
+
+    try:
+        max_age_path = os.path.join(os.path.dirname(__file__), 'max_age_days.txt')
+        if os.path.exists(max_age_path):
+            with open(max_age_path, 'r') as f:
+                st.session_state.max_age_days_slider = int(f.read().strip())
+        else:
+            st.session_state.max_age_days_slider = 7
+    except:
+        st.session_state.max_age_days_slider = 7
+
     st.session_state.cb_initialized = True
 
 MATCH_PALETTE = ["#FFD700", "#00FFFF", "#39FF14", "#FF00FF", "#FFA500", "#FF3131", "#1F51FF", "#F0E68C"]
@@ -1167,83 +1266,6 @@ if monitored_words:
     all_items = st.session_state.get('fetched_items', [])
     match_count = sum(1 for item in all_items if any(check_keyword_match(w, item['title'].lower()) for w in monitored_words))
     st.sidebar.caption(f"🎯 Monitoring {len(monitored_words)} words | Found {match_count} matches")
-
-st.sidebar.markdown("---")
-st.sidebar.markdown("### 📰 News Sources")
-
-col_sel, col_clr = st.sidebar.columns(2)
-if col_sel.button("Select All", use_container_width=True):
-    for internal_name, _ in sources_data:
-        st.session_state[f"cb_{internal_name}"] = True
-    save_selections([src[0] for src in sources_data])
-    st.rerun()
-if col_clr.button("Clear All", use_container_width=True):
-    for internal_name, _ in sources_data:
-        st.session_state[f"cb_{internal_name}"] = False
-    save_selections([])
-    st.rerun()
-    
-selected_sources = []
-
-thai_sources = {
-    "Google News (Thailand)", "Google News TH (IT)", "Isranews (Thai News)",
-    "JS100 (Traffic & News)", "Krungthep Turakij (Business News)", "Matichon (Thai News)",
-    "Pantip (Thai Trends)", "Spaceth.co (Space News)", "The Standard (Thai News)",
-    "Thairath (Thai News)", "Blognone (IT News)"
-}
-
-with st.sidebar.expander("🇹🇭 ประเทศไทย (Thailand)", expanded=True):
-    col_sel_th, col_clr_th = st.columns(2)
-    if col_sel_th.button("Select All TH", key="sel_th", use_container_width=True):
-        for internal_name, _ in sources_data:
-            if internal_name in thai_sources:
-                st.session_state[f"cb_{internal_name}"] = True
-        st.rerun()
-    if col_clr_th.button("Clear All TH", key="clr_th", use_container_width=True):
-        for internal_name, _ in sources_data:
-            if internal_name in thai_sources:
-                st.session_state[f"cb_{internal_name}"] = False
-        st.rerun()
-        
-    for internal_name, display_name in sources_data:
-        if internal_name in thai_sources:
-            key = f"cb_{internal_name}"
-            val = st.checkbox(display_name, key=key)
-            if val:
-                selected_sources.append(internal_name)
-
-with st.sidebar.expander("🌐 ต่างประเทศ (International)", expanded=True):
-    col_sel_int, col_clr_int = st.columns(2)
-    if col_sel_int.button("Select All INT", key="sel_int", use_container_width=True):
-        for internal_name, _ in sources_data:
-            if internal_name not in thai_sources:
-                st.session_state[f"cb_{internal_name}"] = True
-        st.rerun()
-    if col_clr_int.button("Clear All INT", key="clr_int", use_container_width=True):
-        for internal_name, _ in sources_data:
-            if internal_name not in thai_sources:
-                st.session_state[f"cb_{internal_name}"] = False
-        st.rerun()
-        
-    for internal_name, display_name in sources_data:
-        if internal_name not in thai_sources:
-            key = f"cb_{internal_name}"
-            val = st.checkbox(display_name, key=key)
-            if val:
-                selected_sources.append(internal_name)
-
-# --- FAIL-SAFE REMOVED to allow explicit empty state ---
-# if not selected_sources:
-#     selected_sources = [src[0] for src in sources_data]
-
-st.sidebar.caption(f"📂 Sources selected: {len(selected_sources)} / {len(sources_data)}")
-if search_query:
-    st.sidebar.caption(f"🔍 Active Search: '{search_query}'")
-
-# Detect change in selection to save to file
-if 'prev_selected' not in st.session_state or set(st.session_state.prev_selected) != set(selected_sources):
-    save_selections(selected_sources)
-    st.session_state.prev_selected = selected_sources
 
 if 'running_state' not in st.session_state:
     # Restore from file in case of page reload
@@ -1302,6 +1324,10 @@ st.sidebar.markdown(f"""
 </style>
 """, unsafe_allow_html=True)
 
+# Pre-calculate selected sources based on checkbox session states
+selected_sources = [src[0] for src in sources_data if st.session_state.get(f"cb_{src[0]}", False)]
+
+# --- Settings & Auto Refresh panel moved under START/STOP ---
 st.sidebar.subheader("🔄 Auto Refresh")
 enable_auto = st.sidebar.toggle("Enable Background Fetching", value=True)
 
@@ -1320,6 +1346,37 @@ user_tz = timezone(timedelta(hours=TIMEZONE_OPTIONS[selected_tz_name]))
 
 with STATE_LOCK:
     GLOBAL_STATE["user_tz"] = user_tz
+
+# --- Date Filter ---
+st.sidebar.subheader("📅 Date Filter")
+enable_date_filter = st.sidebar.toggle("Enable Date Filter", key="enable_date_filter_toggle")
+
+# Save state when toggle is clicked
+try:
+    with open(os.path.join(os.path.dirname(__file__), 'date_filter_enabled.txt'), 'w') as f:
+        f.write(str(enable_date_filter))
+except: pass
+
+if enable_date_filter:
+    if "max_age_days_slider" not in st.session_state:
+        try:
+            max_age_path = os.path.join(os.path.dirname(__file__), 'max_age_days.txt')
+            if os.path.exists(max_age_path):
+                with open(max_age_path, 'r') as f:
+                    st.session_state.max_age_days_slider = int(f.read().strip())
+            else:
+                st.session_state.max_age_days_slider = 7
+        except:
+            st.session_state.max_age_days_slider = 7
+    max_age_days = st.sidebar.slider("Max Age (Days)", min_value=1, max_value=31, key="max_age_days_slider")
+    
+    # Save age to file
+    try:
+        with open(os.path.join(os.path.dirname(__file__), 'max_age_days.txt'), 'w') as f:
+            f.write(str(max_age_days))
+    except: pass
+else:
+    max_age_days = 9999  # Disable filtering by setting a large age limit
 
 def format_ts(ts):
     if ts <= 0: return "--:--:--"
@@ -1370,6 +1427,81 @@ if enable_auto and auto_refresh_interval > 0 and st.session_state.get('running_s
         setInterval(tick, 1000); tick();
         </script>""", height=105)
 
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 📰 News Sources")
+
+col_sel, col_clr = st.sidebar.columns(2)
+if col_sel.button("Select All", use_container_width=True):
+    for internal_name, _ in sources_data:
+        st.session_state[f"cb_{internal_name}"] = True
+    save_selections([src[0] for src in sources_data])
+    st.rerun()
+if col_clr.button("Clear All", use_container_width=True):
+    for internal_name, _ in sources_data:
+        st.session_state[f"cb_{internal_name}"] = False
+    save_selections([])
+    st.rerun()
+    
+thai_sources = {
+    "Google News (Thailand)", "Google News TH (IT)", "Isranews (Thai News)",
+    "JS100 (Traffic & News)", "Krungthep Turakij (Business News)", "Matichon (Thai News)",
+    "Pantip (Thai Trends)", "Spaceth.co (Space News)", "The Standard (Thai News)",
+    "Thairath (Thai News)", "Blognone (IT News)"
+}
+
+with st.sidebar.expander("🇹🇭 ประเทศไทย (Thailand)", expanded=True):
+    col_sel_th, col_clr_th = st.columns(2)
+    if col_sel_th.button("Select All TH", key="sel_th", use_container_width=True):
+        for internal_name, _ in sources_data:
+            if internal_name in thai_sources:
+                st.session_state[f"cb_{internal_name}"] = True
+        st.rerun()
+    if col_clr_th.button("Clear All TH", key="clr_th", use_container_width=True):
+        for internal_name, _ in sources_data:
+            if internal_name in thai_sources:
+                st.session_state[f"cb_{internal_name}"] = False
+        st.rerun()
+        
+    for internal_name, display_name in sources_data:
+        if internal_name in thai_sources:
+            key = f"cb_{internal_name}"
+            st.checkbox(display_name, key=key)
+
+with st.sidebar.expander("🌐 ต่างประเทศ (International)", expanded=True):
+    col_sel_int, col_clr_int = st.columns(2)
+    if col_sel_int.button("Select All INT", key="sel_int", use_container_width=True):
+        for internal_name, _ in sources_data:
+            if internal_name not in thai_sources:
+                st.session_state[f"cb_{internal_name}"] = True
+        st.rerun()
+    if col_clr_int.button("Clear All INT", key="clr_int", use_container_width=True):
+        for internal_name, _ in sources_data:
+            if internal_name not in thai_sources:
+                st.session_state[f"cb_{internal_name}"] = False
+        st.rerun()
+        
+    for internal_name, display_name in sources_data:
+        if internal_name not in thai_sources:
+            key = f"cb_{internal_name}"
+            st.checkbox(display_name, key=key)
+
+# --- FAIL-SAFE REMOVED to allow explicit empty state ---
+# if not selected_sources:
+#     selected_sources = [src[0] for src in sources_data]
+
+st.sidebar.caption(f"📂 Sources selected: {len(selected_sources)} / {len(sources_data)}")
+if search_query:
+    st.sidebar.caption(f"🔍 Active Search: '{search_query}'")
+
+# Detect change in selection to save to file
+if 'prev_selected' not in st.session_state or set(st.session_state.prev_selected) != set(selected_sources):
+    save_selections(selected_sources)
+    st.session_state.prev_selected = selected_sources
+
+
+
+
+
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("<div style='text-align: center; color: #bbb; font-size: 15px;'>Credits: <b style='color: white;'>Joopiest Udomsaph</b></div>", unsafe_allow_html=True)
@@ -1410,6 +1542,15 @@ else:
     # Revert to stable source-based filtering
     filtered_items = [item for item in st.session_state.fetched_items if item['source'] in allowed_names]
             
+    # Apply Date Filter
+    if st.session_state.get('enable_date_filter_toggle', False):
+        now = time.time()
+        max_age_seconds = st.session_state.get('max_age_days_slider', 7) * 86400
+        filtered_items = [
+            item for item in filtered_items 
+            if (now - item.get('pub_timestamp', now)) <= max_age_seconds
+        ]
+
     if search_query:
         filtered_items = [item for item in filtered_items if search_query.lower() in item['title'].lower()]
     
@@ -1454,7 +1595,11 @@ else:
             card_style = f"border: 3px solid {match_color}; box-shadow: 0 0 15px {match_color}44;" if is_monitored else ""
             match_badge = f'<span style="background-color: {match_color}; color: #000; padding: 2px 8px; border-radius: 4px; font-weight: 900; font-size: 11px; margin-right: 8px; box-shadow: 0 0 15px {match_color}; animation: match-pulse 1s infinite;">🎯 WATCHLIST</span>' if is_monitored else ""
             
-            st.markdown(f'<div class="{card_class}" style="{card_style}"><div style="flex: 1;"><span class="source-badge" style="background-color: {bg_color};">{item["source"]}</span> <span class="category-badge">{category}</span> {match_badge}<br><a class="news-title" href="{item["url"]}" target="_blank" style="color: {match_color if is_monitored else "white"} !important; font-weight: {"900" if is_monitored else "normal"};">{item["title"]}</a></div></div>', unsafe_allow_html=True)
+            # Format relative time for publication age
+            rel_time = format_relative_time(item.get('pub_timestamp', time.time()))
+            time_badge = f'<span class="time-badge" style="background-color: rgba(255,255,255,0.08); color: #ccc; padding: 2px 8px; border-radius: 4px; font-size: 11px; margin-left: 5px;">⏳ {rel_time}</span>'
+            
+            st.markdown(f'<div class="{card_class}" style="{card_style}"><div style="flex: 1;"><span class="source-badge" style="background-color: {bg_color};">{item["source"]}</span> <span class="category-badge">{category}</span> {time_badge} {match_badge}<br><a class="news-title" href="{item["url"]}" target="_blank" style="color: {match_color if is_monitored else "white"} !important; font-weight: {"900" if is_monitored else "normal"};">{item["title"]}</a></div></div>', unsafe_allow_html=True)
 
     tab_options = ["📊 Digg Stack", "All Feed", "🎯 Watchlist", "Breaking", "Technology", "Education", "Politics", "Finance", "Economy", "Entertainment", "General"]
     active_tab = st.session_state.get('active_tab', "📊 Digg Stack")
@@ -1483,10 +1628,37 @@ else:
         for idx, item in enumerate(sorted_items):
             with cols[idx % 3]: render_item(item, f"all_{idx}")
     elif active_tab == "🎯 Watchlist":
-        # Use ALL fetched items for Watchlist, ignoring source/search filters
+        # Use ALL fetched items for Watchlist, ignoring source filters but respecting search and keywords
         all_fetched = st.session_state.get('fetched_items', [])
         watch_items = [item for item in all_fetched if item.get('is_monitored', False)]
-        watch_items = sorted(watch_items, key=get_total_score, reverse=True)
+        
+        # Merge permanently archived watchlist items from Firestore
+        archived_items = get_archived_watchlist_items()
+        
+        # Deduplicate using article ID and filter by current monitored keywords and search query
+        seen_ids = set()
+        combined_items = []
+        for item in watch_items + archived_items:
+            if item['id'] not in seen_ids:
+                title_lower = item['title'].lower()
+                matches_current = False
+                for word in monitored_words:
+                    if check_keyword_match(word, title_lower):
+                        matches_current = True
+                        item['is_monitored'] = True
+                        item['match_color'] = kw_colors.get(word, "#FFD700")
+                        break
+                
+                # Only include in Watchlist if it matches a currently monitored word
+                if matches_current:
+                    combined_items.append(item)
+                    seen_ids.add(item['id'])
+        
+        # Apply Search Query filter to Watchlist tab
+        if search_query:
+            combined_items = [item for item in combined_items if search_query.lower() in item['title'].lower()]
+            
+        watch_items = sorted(combined_items, key=get_total_score, reverse=True)
         
         if not watch_items: st.info("No items match your watchlist keywords.")
         else:
@@ -1513,7 +1685,8 @@ else:
                 "source": item['source'],
                 "is_monitored": item.get('is_monitored', False),
                 "match_color": item.get('match_color', "#FFD700"),
-                "fetch_time": formatted_time
+                "fetch_time": formatted_time,
+                "pub_time": format_relative_time(item.get('pub_timestamp', time.time()))
             })
         js_data = json.dumps(stack_data)
 
