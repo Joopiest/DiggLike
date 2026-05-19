@@ -1,5 +1,13 @@
 import sys
 import os
+import logging
+
+# Configure logging to output to stderr/Streamlit log console
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+
 # Ensure directory of Digg.py and possible subdirectories are in sys.path
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(current_dir)
@@ -15,8 +23,22 @@ from bs4 import BeautifulSoup
 import time
 import json
 import threading
+from concurrent.futures import ThreadPoolExecutor
+
+# Global ThreadPoolExecutor for asynchronous Firebase operations (archiving/deleting/clearing)
+# Using daemon threads to prevent blocking application shutdown
+def _init_daemon_thread():
+    threading.current_thread().daemon = True
+
+FIREBASE_EXECUTOR = ThreadPoolExecutor(
+    max_workers=5,
+    thread_name_prefix="firebase_bg",
+    initializer=_init_daemon_thread
+)
+
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import streamlit.components.v1 as components
+from streamlit_autorefresh import st_autorefresh
 import re
 import calendar
 from datetime import datetime, timezone, timedelta
@@ -114,26 +136,49 @@ try:
     firebase_admin.get_app()
 except ValueError:
     try:
-        # Try local JSON file first (Parent directory)
-        cred_path = os.path.join(os.path.dirname(__file__), '..', 'joopiest-f16cf-firebase-adminsdk-fbsvc-3547a4eba1.json')
+        initialized = False
         
-        if os.path.exists(cred_path):
-            cred = credentials.Certificate(cred_path)
-            firebase_admin.initialize_app(cred)
-        else:
-            # Try Streamlit Secrets (Cloud)
+        # 1. Try Streamlit Secrets first (for Cloud/Production)
+        try:
+            if "firebase" in st.secrets:
+                cert_dict = dict(st.secrets["firebase"])
+                cred = credentials.Certificate(cert_dict)
+                firebase_admin.initialize_app(cred)
+                initialized = True
+                logging.info("Firebase initialized using st.secrets")
+        except Exception as secrets_err:
+            logging.debug(f"Streamlit secrets not available or failed: {secrets_err}")
+
+        # 2. Try Environment Variable (standard cloud/docker practice)
+        if not initialized and os.environ.get("FIREBASE_CREDENTIALS"):
             try:
-                if "firebase" in st.secrets:
-                    cert_dict = dict(st.secrets["firebase"])
-                    cred = credentials.Certificate(cert_dict)
+                cert_json = json.loads(os.environ.get("FIREBASE_CREDENTIALS"))
+                cred = credentials.Certificate(cert_json)
+                firebase_admin.initialize_app(cred)
+                initialized = True
+                logging.info("Firebase initialized using environment variable FIREBASE_CREDENTIALS")
+            except Exception as env_err:
+                logging.error(f"Failed to initialize Firebase using environment variable: {env_err}")
+
+        # 3. Fallback to local JSON file (Parent directory)
+        if not initialized:
+            cred_path = os.path.join(os.path.dirname(__file__), '..', 'joopiest-f16cf-firebase-adminsdk-fbsvc-3547a4eba1.json')
+            if os.path.exists(cred_path):
+                try:
+                    cred = credentials.Certificate(cred_path)
                     firebase_admin.initialize_app(cred)
-                else:
-                    st.warning("Firebase credentials not found (No JSON or Secrets). Global voting disabled.")
-            except:
-                # Handle cases where st.secrets is accessed but no secrets.toml exists
-                st.warning("Firebase credentials not found (Local Mode). Global voting disabled.")
+                    initialized = True
+                    logging.info(f"Firebase initialized using local file: {cred_path}")
+                except Exception as file_err:
+                    logging.error(f"Failed to load local Firebase credential file: {file_err}")
+
+        if not initialized:
+            st.warning("Firebase credentials not found. Global voting and archiving disabled.")
+            logging.warning("Firebase credentials not initialized (Secrets, Env, and local file checked).")
+            
     except Exception as e:
         st.error(f"Error initializing Firebase: {e}")
+        logging.error(f"Error initializing Firebase: {e}", exc_info=True)
 
 try:
     db = firestore.client()
@@ -720,16 +765,16 @@ def bulk_archive_selected(items_to_archive):
     st.rerun()
 
 def async_delete_from_firebase(item_id):
-    """Spawns a daemon thread to delete an article from Firestore asynchronously."""
+    """Submits a task to the Firebase ThreadPoolExecutor to delete an article from Firestore asynchronously."""
     def run():
         if 'db' in globals() and db:
             try:
                 db_id = get_db_id(item_id)
                 db.collection('watchlist_archive').document(db_id).delete()
-            except:
-                pass
-    import threading
-    threading.Thread(target=run, daemon=True).start()
+                logging.info(f"Successfully deleted article {item_id} from Firestore archive.")
+            except Exception as e:
+                logging.error(f"Error deleting article {item_id} from Firestore: {e}")
+    FIREBASE_EXECUTOR.submit(run)
 
 def bulk_delete_selected(items_to_delete):
     count = 0
@@ -750,17 +795,19 @@ def bulk_delete_selected(items_to_delete):
     st.rerun()
 
 def async_clear_all_archive():
-    """Spawns a daemon thread to delete all documents from watchlist_archive in Firestore."""
+    """Submits a task to the Firebase ThreadPoolExecutor to delete all documents from watchlist_archive in Firestore."""
     def run():
         if 'db' in globals() and db:
             try:
                 docs = db.collection('watchlist_archive').stream()
+                count = 0
                 for doc in docs:
                     doc.reference.delete()
-            except:
-                pass
-    import threading
-    threading.Thread(target=run, daemon=True).start()
+                    count += 1
+                logging.info(f"Successfully cleared all {count} articles from Firestore archive.")
+            except Exception as e:
+                logging.error(f"Error clearing Firestore archive: {e}")
+    FIREBASE_EXECUTOR.submit(run)
 
 def select_all_on_page(page_items, active_tab_name):
     prefix_base = ""
@@ -880,7 +927,7 @@ def check_keyword_match(keyword, text_lower):
         return re.search(rf'\b{re.escape(keyword)}\b', text_lower, re.I) is not None
 
 def async_archive_to_firebase(item, word):
-    """Spawns a daemon thread to write a matched article to Firestore asynchronously."""
+    """Submits a task to the Firebase ThreadPoolExecutor to write a matched article to Firestore asynchronously."""
     def run():
         if 'db' in globals() and db:
             try:
@@ -897,10 +944,10 @@ def async_archive_to_firebase(item, word):
                     "matched_word": word,
                     "base_score": item.get('base_score', 100)
                 }, merge=True)
-            except:
-                pass
-    import threading
-    threading.Thread(target=run, daemon=True).start()
+                logging.info(f"Successfully archived article {item['id']} to Firestore. Match word: {word}")
+            except Exception as e:
+                logging.error(f"Error archiving article {item['id']} to Firestore: {e}")
+    FIREBASE_EXECUTOR.submit(run)
 
 def enrich_item(item):
     """Adds category, watchlist metadata, and fetch time to an item once."""
@@ -973,6 +1020,7 @@ def fetch_reddit():
             items.append(enrich_item(item))
         return items
     except Exception as e:
+        logging.error(f"Error fetching Reddit: {e}")
         return []
 
 def fetch_rss(feed_url, source_name, category):
@@ -1002,6 +1050,7 @@ def fetch_rss(feed_url, source_name, category):
             items.append(enrich_item(item))
         return items
     except Exception as e:
+        logging.error(f"Error fetching RSS from {source_name} ({feed_url}): {e}")
         return []
 
 def fetch_pantip():
@@ -1032,6 +1081,7 @@ def fetch_pantip():
                 break
         return items
     except Exception as e:
+        logging.error(f"Error fetching Pantip: {e}")
         return []
 
 def fetch_nitter(path, source_name, category):
@@ -1050,7 +1100,8 @@ def fetch_nitter(path, source_name, category):
             if response.status_code == 200:
                 feed = feedparser.parse(response.text)
                 if feed.entries: return feed.entries
-        except: pass
+        except Exception as err:
+            logging.debug(f"Nitter instance {instance} check failed: {err}")
         return None
 
     with ThreadPoolExecutor(max_workers=len(instances)) as executor:
@@ -1074,7 +1125,8 @@ def fetch_nitter(path, source_name, category):
                         }
                         items.append(enrich_item(item))
                     return items
-            except: pass
+            except Exception as err:
+                logging.debug(f"Error resolving Nitter check future: {err}")
     return []
 
 def get_raw_data(sources_selected):
@@ -1125,11 +1177,14 @@ def get_raw_data(sources_selected):
         }
         
         for future in as_completed(future_to_source, timeout=10):
+            source_name = future_to_source[future]
             try:
                 all_items.extend(future.result(timeout=5))
-            except: continue
+            except Exception as e:
+                logging.error(f"Error resolving future for source {source_name}: {e}")
+                continue
     except Exception as e:
-        pass
+        logging.error(f"Error during bulk raw data fetch: {e}")
     finally:
         executor.shutdown(wait=False)
                 
@@ -1345,64 +1400,84 @@ sources_data = sorted([
     ("X (Twitter Trends)", "🐦 **X (Twitter)**")
 ], key=lambda x: x[0])
 
-# --- Persist selected sources ---
+# --- Migration and Persistence of settings on SQLite ---
+def migrate_legacy_txt_settings():
+    """Migrates legacy .txt setting files into SQLite database and cleans them up."""
+    legacy_files = {
+        'selected_sources.txt': 'selected_sources',
+        'monitored_keywords.txt': 'monitored_keywords',
+        'last_fetch_time.txt': 'last_fetch_time',
+        'date_filter_enabled.txt': 'date_filter_enabled',
+        'max_age_days.txt': 'max_age_days',
+        'auto_archive_watchlist.txt': 'auto_archive_watchlist',
+        'auto_archive_search.txt': 'auto_archive_search',
+        'running_state.txt': 'running_state',
+        'refresh_interval.txt': 'refresh_interval'
+    }
+    for filename, setting_key in legacy_files.items():
+        path = os.path.join(os.path.dirname(__file__), filename)
+        if os.path.exists(path):
+            try:
+                encoding = 'utf-8' if 'keyword' in filename else None
+                with open(path, 'r', encoding=encoding) as f:
+                    content = f.read().strip()
+                db_manager.set_setting(setting_key, content)
+                os.remove(path)
+                logging.info(f"Successfully migrated legacy file {filename} to database setting '{setting_key}'")
+            except Exception as e:
+                logging.error(f"Error migrating legacy file {filename}: {e}")
+
 def save_selections(selected):
     try:
-        path = os.path.join(os.path.dirname(__file__), 'selected_sources.txt')
-        with open(path, 'w') as f:
-            f.write(",".join(selected))
-    except: pass
+        db_manager.set_setting('selected_sources', ",".join(selected))
+    except Exception as e:
+        logging.error(f"Error saving selections: {e}")
 
 def load_selections():
     try:
-        path = os.path.join(os.path.dirname(__file__), 'selected_sources.txt')
-        if os.path.exists(path):
-            with open(path, 'r') as f:
-                content = f.read().strip()
-                if content:
-                    return content.split(",")
-    except: pass
+        val = db_manager.get_setting('selected_sources')
+        if val:
+            return val.split(",")
+    except Exception as e:
+        logging.error(f"Error loading selections: {e}")
     return [src[0] for src in sources_data] # Default to ALL
 
 def load_monitored_keywords():
     try:
-        path = os.path.join(os.path.dirname(__file__), 'monitored_keywords.txt')
-        if os.path.exists(path):
-            with open(path, 'r', encoding='utf-8') as f:
-                return f.read().strip()
-    except: pass
+        return db_manager.get_setting('monitored_keywords', "")
+    except Exception as e:
+        logging.error(f"Error loading monitored keywords: {e}")
     return ""
 
 def save_monitored_keywords(keywords):
     try:
-        path = os.path.join(os.path.dirname(__file__), 'monitored_keywords.txt')
-        with open(path, 'w', encoding='utf-8') as f:
-            f.write(keywords)
-    except: pass
+        db_manager.set_setting('monitored_keywords', keywords)
+    except Exception as e:
+        logging.error(f"Error saving monitored keywords: {e}")
 
 def save_last_fetch_time(ts):
     try:
-        path = os.path.join(os.path.dirname(__file__), 'last_fetch_time.txt')
-        with open(path, 'w') as f:
-            f.write(str(ts))
-    except: pass
+        db_manager.set_setting('last_fetch_time', ts)
+    except Exception as e:
+        logging.error(f"Error saving last fetch time: {e}")
 
 def load_last_fetch_time():
     try:
-        path = os.path.join(os.path.dirname(__file__), 'last_fetch_time.txt')
-        if os.path.exists(path):
-            with open(path, 'r') as f:
-                return float(f.read().strip())
+        val = db_manager.get_setting('last_fetch_time')
+        if val is not None:
+            return float(val)
         
-        # Fallback: Get from DB if file missing
+        # Fallback: Get from DB if setting missing
         recent = db_manager.get_items(limit=1)
         if recent:
             return recent[0].get('fetch_timestamp', 0)
-    except: pass
+    except Exception as e:
+        logging.error(f"Error loading last fetch time: {e}")
     return 0
 
-# Initialize states from file if session is fresh
+# Initialize states from SQLite if session is fresh
 if 'cb_initialized' not in st.session_state:
+    migrate_legacy_txt_settings()  # Run one-time migration first
     saved = load_selections()
     for internal_name, _ in sources_data:
         st.session_state[f"cb_{internal_name}"] = internal_name in saved
@@ -1412,44 +1487,32 @@ if 'cb_initialized' not in st.session_state:
     
     # Load date filter settings
     try:
-        date_filter_path = os.path.join(os.path.dirname(__file__), 'date_filter_enabled.txt')
-        if os.path.exists(date_filter_path):
-            with open(date_filter_path, 'r') as f:
-                st.session_state.enable_date_filter_toggle = f.read().strip() == 'True'
-        else:
-            st.session_state.enable_date_filter_toggle = False
-    except:
+        val = db_manager.get_setting('date_filter_enabled', 'False')
+        st.session_state.enable_date_filter_toggle = val == 'True'
+    except Exception as e:
+        logging.error(f"Error initializing date filter: {e}")
         st.session_state.enable_date_filter_toggle = False
 
     try:
-        max_age_path = os.path.join(os.path.dirname(__file__), 'max_age_days.txt')
-        if os.path.exists(max_age_path):
-            with open(max_age_path, 'r') as f:
-                st.session_state.max_age_days_slider = int(f.read().strip())
-        else:
-            st.session_state.max_age_days_slider = 7
-    except:
+        val = db_manager.get_setting('max_age_days', '7')
+        st.session_state.max_age_days_slider = int(val)
+    except Exception as e:
+        logging.error(f"Error initializing max age days: {e}")
         st.session_state.max_age_days_slider = 7
 
     # Load auto-archive settings
     try:
-        path = os.path.join(os.path.dirname(__file__), 'auto_archive_watchlist.txt')
-        if os.path.exists(path):
-            with open(path, 'r') as f:
-                st.session_state.auto_archive_watchlist = f.read().strip() == 'True'
-        else:
-            st.session_state.auto_archive_watchlist = True
-    except:
+        val = db_manager.get_setting('auto_archive_watchlist', 'True')
+        st.session_state.auto_archive_watchlist = val == 'True'
+    except Exception as e:
+        logging.error(f"Error initializing auto archive watchlist: {e}")
         st.session_state.auto_archive_watchlist = True
 
     try:
-        path = os.path.join(os.path.dirname(__file__), 'auto_archive_search.txt')
-        if os.path.exists(path):
-            with open(path, 'r') as f:
-                st.session_state.auto_archive_search = f.read().strip() == 'True'
-        else:
-            st.session_state.auto_archive_search = False
-    except:
+        val = db_manager.get_setting('auto_archive_search', 'False')
+        st.session_state.auto_archive_search = val == 'True'
+    except Exception as e:
+        logging.error(f"Error initializing auto archive search: {e}")
         st.session_state.auto_archive_search = False
 
     # Pre-populate archived_ids from Firestore cache
@@ -1521,33 +1584,28 @@ if monitored_words:
     st.sidebar.caption(f"🎯 Monitoring {len(monitored_words)} words | Found {match_count} matches")
 
 if 'running_state' not in st.session_state:
-    # Restore from file in case of page reload
+    # Restore from SQLite in case of page reload
     try:
-        file_path = os.path.join(os.path.dirname(__file__), 'running_state.txt')
-        with open(file_path, 'r') as f:
-            st.session_state.running_state = f.read().strip() == 'True'
-    except:
+        val = db_manager.get_setting('running_state', 'False')
+        st.session_state.running_state = val == 'True'
+    except Exception as e:
+        logging.error(f"Error restoring running state: {e}")
         st.session_state.running_state = False
 
-    # Restore refresh interval from file
+    # Restore refresh interval from SQLite
     try:
-        interval_path = os.path.join(os.path.dirname(__file__), 'refresh_interval.txt')
-        if os.path.exists(interval_path):
-            with open(interval_path, 'r') as f:
-                saved_interval = int(f.read().strip())
-                st.session_state.refresh_interval_slider = saved_interval
-        else:
-            st.session_state.refresh_interval_slider = 5
-    except:
+        val = db_manager.get_setting('refresh_interval', '5')
+        st.session_state.refresh_interval_slider = int(val)
+    except Exception as e:
+        logging.error(f"Error restoring refresh interval: {e}")
         st.session_state.refresh_interval_slider = 5
 
 def on_start_stop_click():
     st.session_state.running_state = not st.session_state.running_state
     try:
-        file_path = os.path.join(os.path.dirname(__file__), 'running_state.txt')
-        with open(file_path, 'w') as f:
-            f.write(str(st.session_state.running_state))
-    except: pass
+        db_manager.set_setting('running_state', str(st.session_state.running_state))
+    except Exception as e:
+        logging.error(f"Error saving running state: {e}")
     
     if st.session_state.running_state:
         BG_CONFIG["running"] = True
@@ -1607,28 +1665,25 @@ enable_date_filter = st.sidebar.toggle("Enable Date Filter", key="enable_date_fi
 
 # Save state when toggle is clicked
 try:
-    with open(os.path.join(os.path.dirname(__file__), 'date_filter_enabled.txt'), 'w') as f:
-        f.write(str(enable_date_filter))
-except: pass
+    db_manager.set_setting('date_filter_enabled', str(enable_date_filter))
+except Exception as e:
+    logging.error(f"Error saving date filter enabled: {e}")
 
 if enable_date_filter:
     if "max_age_days_slider" not in st.session_state:
         try:
-            max_age_path = os.path.join(os.path.dirname(__file__), 'max_age_days.txt')
-            if os.path.exists(max_age_path):
-                with open(max_age_path, 'r') as f:
-                    st.session_state.max_age_days_slider = int(f.read().strip())
-            else:
-                st.session_state.max_age_days_slider = 7
-        except:
+            val = db_manager.get_setting('max_age_days', '7')
+            st.session_state.max_age_days_slider = int(val)
+        except Exception as e:
+            logging.error(f"Error restoring max age days slider: {e}")
             st.session_state.max_age_days_slider = 7
     max_age_days = st.sidebar.slider("Max Age (Days)", min_value=1, max_value=31, key="max_age_days_slider")
     
-    # Save age to file
+    # Save age to SQLite
     try:
-        with open(os.path.join(os.path.dirname(__file__), 'max_age_days.txt'), 'w') as f:
-            f.write(str(max_age_days))
-    except: pass
+        db_manager.set_setting('max_age_days', max_age_days)
+    except Exception as e:
+        logging.error(f"Error saving max age days: {e}")
 else:
     max_age_days = 9999  # Disable filtering by setting a large age limit
 
@@ -1665,14 +1720,14 @@ auto_archive_search = st.sidebar.toggle("Auto-Archive Search", key="auto_archive
 
 # Save state when toggles are clicked
 try:
-    with open(os.path.join(os.path.dirname(__file__), 'auto_archive_watchlist.txt'), 'w') as f:
-        f.write(str(auto_archive_watchlist))
-except: pass
+    db_manager.set_setting('auto_archive_watchlist', str(auto_archive_watchlist))
+except Exception as e:
+    logging.error(f"Error saving auto archive watchlist: {e}")
 
 try:
-    with open(os.path.join(os.path.dirname(__file__), 'auto_archive_search.txt'), 'w') as f:
-        f.write(str(auto_archive_search))
-except: pass
+    db_manager.set_setting('auto_archive_search', str(auto_archive_search))
+except Exception as e:
+    logging.error(f"Error saving auto archive search: {e}")
 
 # Clear All Archive button in sidebar
 if st.sidebar.button("🚨 Clear All Archive", help="Wipe all archived articles from Firebase Firestore", use_container_width=True):
@@ -1724,14 +1779,17 @@ if enable_auto:
         # 1. The Slider
         auto_refresh_interval = st.slider("Interval (Minutes)", min_value=1, max_value=60, key="refresh_interval_slider")
         
-        # Save interval to file to persist across javascript reloads
+        # Save interval to SQLite
         try:
-            with open(os.path.join(os.path.dirname(__file__), 'refresh_interval.txt'), 'w') as f:
-                f.write(str(auto_refresh_interval))
-        except: pass
+            db_manager.set_setting('refresh_interval', auto_refresh_interval)
+        except Exception as e:
+            logging.error(f"Error saving refresh interval: {e}")
         
         # 2. The Status Box (Only if system is running)
         if st.session_state.get('running_state', False):
+            # Run the native Streamlit auto refresh trigger
+            st_autorefresh(interval=auto_refresh_interval * 60 * 1000, key="digg_autorefresh")
+            
             last_fetch = st.session_state.get('last_fetch_time', 0)
             with STATE_LOCK:
                 global_ts = GLOBAL_STATE.get("last_fetch_time", 0)
@@ -1743,7 +1801,7 @@ if enable_auto:
                 st.rerun()
 
             last_time_str = format_ts(last_fetch)
-            next_time_str = format_ts(last_fetch + auto_refresh_interval * 60) if last_fetch > 0 else "Pending..."
+            next_time_str = format_ts(time.time() + auto_refresh_interval * 60)
             
             components.html(f"""
             <div style='background:rgba(255,255,255,0.08);border-radius:8px;padding:10px;font-size:12px;font-family:sans-serif;'>
@@ -1752,36 +1810,18 @@ if enable_auto:
                 <div id='cd' style='font-weight:bold;font-size:16px;margin-top:4px;color:#00CC44;'>--:--</div>
             </div>
             <script>
-            const fetchTs = {int(last_fetch * 1000)};
-            const serverNow = {int(time.time() * 1000)};
+            const pageRenderTime = Date.now();
             const intervalMs = {auto_refresh_interval * 60 * 1000};
-            const isSystemRunning = {"true" if st.session_state.get('running_state', False) else "false"};
-            const clockOffset = Date.now() - serverNow;
             function tick() {{
                 const el = document.getElementById('cd');
                 if (!el) return;
-                if (fetchTs === 0) {{
-                    el.textContent = '🔄 Initializing...';
-                    if (isSystemRunning) {{
-                        const lastReload = parseInt(window.top.sessionStorage.getItem('digg_last_reload') || '0');
-                        if (Date.now() - lastReload > 8000) {{
-                            window.top.sessionStorage.setItem('digg_last_reload', Date.now());
-                            window.top.location.reload();
-                        }}
-                    }}
-                    return;
-                }}
-                const nowServerTime = Date.now() - clockOffset;
-                const remaining = Math.max(0, intervalMs - (nowServerTime - fetchTs));
+                const elapsed = Date.now() - pageRenderTime;
+                const remaining = Math.max(0, intervalMs - elapsed);
                 const mins = String(Math.floor(remaining / 60000)).padStart(2,'0');
                 const secs = String(Math.floor((remaining % 60000) / 1000)).padStart(2,'0');
                 el.textContent = (remaining <= 30000 ? '⚡ ' : '✅ ') + mins + ':' + secs;
                 if (remaining === 0) {{
-                    const lastReload = parseInt(window.top.sessionStorage.getItem('digg_last_reload') || '0');
-                    if (Date.now() - lastReload > 8000) {{
-                        window.top.sessionStorage.setItem('digg_last_reload', Date.now());
-                        window.top.location.reload();
-                    }}
+                    el.textContent = '🔄 Refreshing...';
                 }}
             }}
             setInterval(tick, 1000); tick();
