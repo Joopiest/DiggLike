@@ -49,7 +49,11 @@ def format_relative_time(pub_timestamp):
     return f"{int(diff // 86400)}d ago"
 
 # --- Global Thread Synchronization ---
+from database import db_manager
+
 STATE_LOCK = threading.Lock()
+MAX_MEMORY_ITEMS = 3000 # Prevent RAM exhaustion in long-running sessions
+
 # Shared state accessible across threads without Disk I/O
 GLOBAL_STATE = {
     "last_fetch_time": 0,
@@ -98,7 +102,9 @@ CATEGORIES_KEYWORDS = {
 import firebase_admin
 from firebase_admin import credentials, firestore
 
-if not firebase_admin._apps:
+try:
+    firebase_admin.get_app()
+except ValueError:
     try:
         # Try local JSON file first (Parent directory)
         cred_path = os.path.join(os.path.dirname(__file__), '..', 'joopiest-f16cf-firebase-adminsdk-fbsvc-3547a4eba1.json')
@@ -158,7 +164,7 @@ def get_cached_global_votes():
     return votes
 
 @st.cache_data(ttl=60)
-def get_archived_watchlist_items():
+def _fetch_archived_watchlist_items():
     """Fetches permanently archived watchlist articles from Firestore with performance limits."""
     items = []
     if 'db' in globals() and db:
@@ -177,6 +183,13 @@ def get_archived_watchlist_items():
             pass
     return items
 
+def get_archived_watchlist_items():
+    items = _fetch_archived_watchlist_items()
+    deleted_ids = st.session_state.get('deleted_archived_ids', set())
+    if deleted_ids:
+        return [item for item in items if item['id'] not in deleted_ids]
+    return items
+
 # --- Background Daemon System Globals ---
 LATEST_NEWS = []
 SEEN_IDS = set()
@@ -188,7 +201,11 @@ def get_bg_config():
         "sources": [],
         "last_fetch_time": 0,
         "running": False,
-        "thread_started": False
+        "thread_started": False,
+        "auto_archive_watchlist": True,
+        "auto_archive_search": False,
+        "search_query": "",
+        "monitored_words": []
     }
 
 BG_CONFIG = get_bg_config()
@@ -666,9 +683,113 @@ if "user_votes" not in st.session_state:
     st.session_state.user_votes = {} # dict mapping item_id -> vote modifier (+1 or -1)
 if "fetched_items" not in st.session_state:
     st.session_state.fetched_items = []
+if "selected_ids" not in st.session_state:
+    st.session_state.selected_ids = set()
+if "deleted_archived_ids" not in st.session_state:
+    st.session_state.deleted_archived_ids = set()
+if "confirm_delete_bulk" not in st.session_state:
+    st.session_state.confirm_delete_bulk = False
+if "confirm_delete_item" not in st.session_state:
+    st.session_state.confirm_delete_item = None
+
+def toggle_selection(item_id):
+    if item_id in st.session_state.selected_ids:
+        st.session_state.selected_ids.remove(item_id)
+    else:
+        st.session_state.selected_ids.add(item_id)
+
+def bulk_archive_selected(items_to_archive):
+    count = 0
+    archived_ids = st.session_state.setdefault('archived_ids', set())
+    for item in items_to_archive:
+        if item['id'] not in archived_ids and item['id'] not in st.session_state.get('deleted_archived_ids', set()):
+            async_archive_to_firebase(item, "bulk_manual")
+            archived_ids.add(item['id'])
+            count += 1
+    st.session_state.selected_ids.clear()
+    st.toast(f"✅ Successfully archived {count} selected articles!", icon="📥")
+    time.sleep(1)
+    st.rerun()
+
+def async_delete_from_firebase(item_id):
+    """Spawns a daemon thread to delete an article from Firestore asynchronously."""
+    def run():
+        if 'db' in globals() and db:
+            try:
+                db_id = get_db_id(item_id)
+                db.collection('watchlist_archive').document(db_id).delete()
+            except:
+                pass
+    import threading
+    threading.Thread(target=run, daemon=True).start()
+
+def bulk_delete_selected(items_to_delete):
+    count = 0
+    archived_ids = st.session_state.setdefault('archived_ids', set())
+    deleted_archived_ids = st.session_state.setdefault('deleted_archived_ids', set())
+    for item in items_to_delete:
+        item_id = item['id']
+        async_delete_from_firebase(item_id)
+        if item_id in archived_ids:
+            archived_ids.remove(item_id)
+        deleted_archived_ids.add(item_id)
+        count += 1
+    st.session_state.selected_ids.clear()
+    st.session_state.confirm_delete_bulk = False
+    _fetch_archived_watchlist_items.clear()
+    st.toast(f"🗑️ Successfully deleted {count} selected articles!", icon="✅")
+    time.sleep(1)
+    st.rerun()
+
+def async_clear_all_archive():
+    """Spawns a daemon thread to delete all documents from watchlist_archive in Firestore."""
+    def run():
+        if 'db' in globals() and db:
+            try:
+                docs = db.collection('watchlist_archive').stream()
+                for doc in docs:
+                    doc.reference.delete()
+            except:
+                pass
+    import threading
+    threading.Thread(target=run, daemon=True).start()
+
+def select_all_on_page(page_items, active_tab_name):
+    prefix_base = ""
+    if active_tab_name == "All Feed": prefix_base = "all"
+    elif active_tab_name == "🎯 Watchlist": prefix_base = "watch"
+    elif active_tab_name == "☁️ Firebase Archive": prefix_base = "firebase_arc"
+    else: prefix_base = "cat"
+    
+    for idx, item in enumerate(page_items):
+        item_id = item['id']
+        st.session_state.selected_ids.add(item_id)
+        widget_key = f"sel_{item_id}_{prefix_base}_{idx}"
+        st.session_state[widget_key] = True
+
+def clear_selection():
+    for key in list(st.session_state.keys()):
+        if key.startswith("sel_") and len(key) > 30:
+            st.session_state[key] = False
+    st.session_state.selected_ids.clear()
 
 # --- Global Votes (Cached) ---
 global_votes = get_cached_global_votes()
+
+SOURCE_MAPPING = {
+    "Reuters (World News)": "Reuters", "Associated Press (AP)": "AP News", "The Information (Tech)": "The Information",
+    "Axios (News)": "Axios", "TikTok Trends": "TikTok",
+    "Threads Trends": "Threads", "Instagram Trends": "Instagram", "Reddit (Global Trends)": "Reddit",
+    "Pantip (Thai Trends)": "Pantip", "Google News (Thailand)": "Google News TH", "Google News TH (IT)": "Google News TH (IT)",
+    "Google News (International)": "Google News Int",
+    "BBC (Global News)": "BBC News", "CNN (Global News)": "CNN", "Al Jazeera (Global News)": "Al Jazeera",
+    "Thairath (Thai News)": "Thairath", "Blognone (IT News)": "Blognone", "The Standard (Thai News)": "The Standard",
+    "Krungthep Turakij (Business News)": "Krungthep Turakij", "Spaceth.co (Space News)": "Spaceth.co",
+    "Physics.org (Science News)": "Phys.org", "Space.com (Space News)": "Space.com", "MIT Tech Review (Tech News)": "MIT Tech Review",
+    "Wired Magazine (Tech News)": "Wired", "Physics World (Science News)": "Physics World", "X (Twitter Trends)": "X (Twitter)",
+    "Isranews (Thai News)": "Isranews", "Matichon (Thai News)": "Matichon", "Bloomberg (Business News)": "Bloomberg",
+    "Wall Street Journal (Business News)": "Wall Street Journal", "JS100 (Traffic & News)": "JS100"
+}
 
 # --- Data Fetching Functions ---
 import re
@@ -796,17 +917,30 @@ def enrich_item(item):
     item['is_monitored'] = False
     item['match_color'] = "#FFD700"
     
-    # Use global monitored words if available, else session state
-    # This is a bit tricky with threads, so we'll pass them in or use a lock
-    monitored = monitored_words if 'monitored_words' in globals() else []
+    # Get active configs from BG_CONFIG safely under locks
+    with STATE_LOCK:
+        auto_archive_wl = BG_CONFIG.get("auto_archive_watchlist", True)
+        auto_archive_sh = BG_CONFIG.get("auto_archive_search", False)
+        active_search = BG_CONFIG.get("search_query", "")
+        monitored = list(BG_CONFIG.get("monitored_words", []))
+        deleted_archived_ids = BG_CONFIG.get("deleted_archived_ids", set())
+        
     for word in monitored:
         if check_keyword_match(word, title_lower):
             item['is_monitored'] = True
-            item['match_color'] = kw_colors.get(word, "#FFD700")
+            if 'kw_colors' in globals():
+                item['match_color'] = kw_colors.get(word, "#FFD700")
             
             # --- Permanent Firebase Archiver (Asynchronous) ---
-            async_archive_to_firebase(item, word)
+            if auto_archive_wl and item['id'] not in deleted_archived_ids:
+                async_archive_to_firebase(item, word)
             break
+            
+    # Check active search query for auto-archiving
+    if active_search and auto_archive_sh:
+        if active_search in title_lower and item['id'] not in deleted_archived_ids:
+            async_archive_to_firebase(item, f"search:{active_search}")
+            
     return item
 
 def fetch_reddit():
@@ -843,7 +977,9 @@ def fetch_rss(feed_url, source_name, category):
         }
         base_score = source_boosts.get(source_name, 100)
         
-        feed = feedparser.parse(feed_url)
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        res = requests.get(feed_url, headers=headers, timeout=5)
+        feed = feedparser.parse(res.content)
         items = []
         for entry in feed.entries[:10]:
             item = {
@@ -971,18 +1107,23 @@ def get_raw_data(sources_selected):
         ("Axios (News)", fetch_nitter, ("/axios/rss", "Axios", "Technology"))
     ]
     
-    # Optimized max_workers to 15 to reduce resource contention
-    with ThreadPoolExecutor(max_workers=15) as executor:
+    # Use ThreadPoolExecutor without context manager to avoid blocking on wait=True shutdown.
+    executor = ThreadPoolExecutor(max_workers=15)
+    try:
         future_to_source = {
             executor.submit(func, *args): name 
             for name, func, args in fetch_configs 
             if name in sources_selected
         }
         
-        for future in as_completed(future_to_source):
+        for future in as_completed(future_to_source, timeout=10):
             try:
                 all_items.extend(future.result(timeout=5))
             except: continue
+    except Exception as e:
+        pass
+    finally:
+        executor.shutdown(wait=False)
                 
     return all_items
 
@@ -993,10 +1134,14 @@ def fetch_all_data(sources_selected):
         all_items = get_raw_data(sources_selected)
         if not all_items:
             st.error("Failed to fetch news.")
+        
+        # Persist to SQLite
+        db_manager.insert_items(all_items)
         st.session_state.fetched_items = all_items
     
     fetch_time = time.time()
     st.session_state['last_fetch_time'] = fetch_time
+    save_last_fetch_time(fetch_time)
     
     with STATE_LOCK:
         GLOBAL_STATE["last_fetch_time"] = fetch_time
@@ -1006,8 +1151,30 @@ def fetch_all_data(sources_selected):
     for item in all_items:
         SEEN_IDS.add(item['id'])
 
+def prune_memory():
+    """Removes old items from SQLite and SEEN_IDS to keep the app lean."""
+    global SEEN_IDS
+    
+    # Load max age from file
+    try:
+        max_age_path = os.path.join(os.path.dirname(__file__), 'max_age_days.txt')
+        max_age_days = 30 # Default to 30 days for database pruning
+        if os.path.exists(max_age_path):
+            with open(max_age_path, 'r') as f:
+                max_age_days = max(30, int(f.read().strip())) # Don't prune DB too aggressively
+    except:
+        max_age_days = 30
+
+    # Prune SQLite database
+    db_manager.prune_old_items(max_age_days=max_age_days)
+
+    # Rebuild SEEN_IDS from database to keep memory lean
+    with STATE_LOCK:
+        recent_items = db_manager.get_items(limit=MAX_MEMORY_ITEMS)
+        SEEN_IDS = {item['id'] for item in recent_items}
+
 def bg_fetch_loop():
-    global SEEN_IDS, LATEST_NEWS
+    global SEEN_IDS
     while True:
         with STATE_LOCK:
             interval = BG_CONFIG["interval_minutes"]
@@ -1020,22 +1187,30 @@ def bg_fetch_loop():
             if now - last_fetch > interval * 60:
                 try:
                     new_items = get_raw_data(selected_sources)
+                    
+                    # Persist new items to SQLite
+                    db_manager.insert_items(new_items)
+                    
                     with STATE_LOCK:
+                        # Re-sync memory state (SEEN_IDS)
                         for item in new_items:
-                            if item['id'] not in SEEN_IDS:
-                                SEEN_IDS.add(item['id'])
-                                LATEST_NEWS.append(item)
-                                GLOBAL_STATE["latest_items"].append(item)
-                        
-                        GLOBAL_STATE["last_fetch_time"] = time.time()
-                        BG_CONFIG["last_fetch_time"] = GLOBAL_STATE["last_fetch_time"]
-                except: pass
+                            SEEN_IDS.add(item['id'])
+                    
+                    # Prune database and memory periodically
+                    prune_memory()
+                except Exception as e:
+                    pass
+                finally:
+                    # Update fetch time to prevent infinite retries and reload loops on failure
+                    fetch_ts = time.time()
+                    with STATE_LOCK:
+                        GLOBAL_STATE["last_fetch_time"] = fetch_ts
+                        BG_CONFIG["last_fetch_time"] = fetch_ts
+                    save_last_fetch_time(fetch_ts)
         time.sleep(10)
 
 
-if not BG_CONFIG.get("thread_started", False):
-    threading.Thread(target=bg_fetch_loop, daemon=True).start()
-    BG_CONFIG["thread_started"] = True
+
 
 # --- UI Layout ---
 
@@ -1197,12 +1372,35 @@ def save_monitored_keywords(keywords):
             f.write(keywords)
     except: pass
 
+def save_last_fetch_time(ts):
+    try:
+        path = os.path.join(os.path.dirname(__file__), 'last_fetch_time.txt')
+        with open(path, 'w') as f:
+            f.write(str(ts))
+    except: pass
+
+def load_last_fetch_time():
+    try:
+        path = os.path.join(os.path.dirname(__file__), 'last_fetch_time.txt')
+        if os.path.exists(path):
+            with open(path, 'r') as f:
+                return float(f.read().strip())
+        
+        # Fallback: Get from DB if file missing
+        recent = db_manager.get_items(limit=1)
+        if recent:
+            return recent[0].get('fetch_timestamp', 0)
+    except: pass
+    return 0
+
 # Initialize states from file if session is fresh
 if 'cb_initialized' not in st.session_state:
     saved = load_selections()
     for internal_name, _ in sources_data:
         st.session_state[f"cb_{internal_name}"] = internal_name in saved
     st.session_state.monitored_keywords = load_monitored_keywords()
+    st.session_state.last_fetch_time = load_last_fetch_time()
+    BG_CONFIG["last_fetch_time"] = st.session_state.last_fetch_time
     
     # Load date filter settings
     try:
@@ -1225,7 +1423,45 @@ if 'cb_initialized' not in st.session_state:
     except:
         st.session_state.max_age_days_slider = 7
 
+    # Load auto-archive settings
+    try:
+        path = os.path.join(os.path.dirname(__file__), 'auto_archive_watchlist.txt')
+        if os.path.exists(path):
+            with open(path, 'r') as f:
+                st.session_state.auto_archive_watchlist = f.read().strip() == 'True'
+        else:
+            st.session_state.auto_archive_watchlist = True
+    except:
+        st.session_state.auto_archive_watchlist = True
+
+    try:
+        path = os.path.join(os.path.dirname(__file__), 'auto_archive_search.txt')
+        if os.path.exists(path):
+            with open(path, 'r') as f:
+                st.session_state.auto_archive_search = f.read().strip() == 'True'
+        else:
+            st.session_state.auto_archive_search = False
+    except:
+        st.session_state.auto_archive_search = False
+
+    # Pre-populate archived_ids from Firestore cache
+    archived_ids = set()
+    try:
+        archived_db_items = get_archived_watchlist_items()
+        for item in archived_db_items:
+            archived_ids.add(item['id'])
+    except: pass
+    st.session_state.archived_ids = archived_ids
+
     st.session_state.cb_initialized = True
+
+if not BG_CONFIG.get("thread_started", False):
+    initial_ts = load_last_fetch_time()
+    with STATE_LOCK:
+        BG_CONFIG["last_fetch_time"] = initial_ts
+        GLOBAL_STATE["last_fetch_time"] = initial_ts
+    threading.Thread(target=bg_fetch_loop, daemon=True).start()
+    BG_CONFIG["thread_started"] = True
 
 MATCH_PALETTE = ["#FFD700", "#00FFFF", "#39FF14", "#FF00FF", "#FFA500", "#FF3131", "#1F51FF", "#F0E68C"]
 
@@ -1236,6 +1472,10 @@ def on_keywords_change():
     words = [w.strip().lower() for w in new_val.replace("\n", ",").split(",") if w.strip()]
     colors = {word: MATCH_PALETTE[i % len(MATCH_PALETTE)] for i, word in enumerate(words)}
     
+    # Dynamic auto-archiving on keywords change
+    auto_archive = st.session_state.get('auto_archive_watchlist', True)
+    archived_ids = st.session_state.setdefault('archived_ids', set())
+    
     if 'fetched_items' in st.session_state and st.session_state.fetched_items:
         for item in st.session_state.fetched_items:
             title_lower = item['title'].lower()
@@ -1245,6 +1485,11 @@ def on_keywords_change():
                 if check_keyword_match(word, title_lower):
                     item['is_monitored'] = True
                     item['match_color'] = colors.get(word, "#FFD700")
+                    
+                    # Interactive auto-archiving if not yet archived in this session
+                    if auto_archive and item['id'] not in archived_ids and item['id'] not in st.session_state.get('deleted_archived_ids', set()):
+                        async_archive_to_firebase(item, word)
+                        archived_ids.add(item['id'])
                     break
 
 st.sidebar.markdown("### 🎯 Watchlist")
@@ -1309,10 +1554,10 @@ if st.session_state.running_state:
 else:
     st.sidebar.button("▶ START", use_container_width=True, type="primary", key="start_btn", on_click=on_start_stop_click)
 
-# Trigger fetch if running but empty
-if st.session_state.get('running_state', False) and not st.session_state.get('fetched_items'):
-    all_sources_list = [src[0] for src in sources_data]
-    fetch_all_data(all_sources_list)
+# --- Removed global fetch trigger to prevent loops ---
+# if st.session_state.get('running_state', False) and not st.session_state.get('fetched_items'):
+#    all_sources_list = [src[0] for src in sources_data]
+#    fetch_all_data(all_sources_list)
 
 btn_bg = "#00CC44" if st.session_state.running_state else "#CC0000"
 st.sidebar.markdown(f"""
@@ -1331,12 +1576,13 @@ selected_sources = [src[0] for src in sources_data if st.session_state.get(f"cb_
 st.sidebar.subheader("🔄 Auto Refresh")
 enable_auto = st.sidebar.toggle("Enable Background Fetching", value=True)
 
-if enable_auto:
+# Define auto_refresh_interval early for logic, but render widget later
+if not enable_auto:
+    auto_refresh_interval = 0
+else:
     if "refresh_interval_slider" not in st.session_state:
         st.session_state.refresh_interval_slider = 5
-    auto_refresh_interval = st.sidebar.slider("Interval (Minutes)", min_value=1, max_value=60, key="refresh_interval_slider")
-else:
-    auto_refresh_interval = 0
+    auto_refresh_interval = st.session_state.refresh_interval_slider
 
 # --- Timezone ---
 st.sidebar.subheader("🌐 Timezone")
@@ -1378,6 +1624,70 @@ if enable_date_filter:
 else:
     max_age_days = 9999  # Disable filtering by setting a large age limit
 
+# Archive Settings
+st.sidebar.subheader("📥 Archive Settings")
+
+col_arc_view, col_arc_scan = st.sidebar.columns([0.6, 0.4])
+if col_arc_view.button("☁️ Open Archive", use_container_width=True):
+    st.session_state.active_tab = "☁️ Firebase Archive"
+    # CLEAR FIRESTORE CACHE to show new items immediately
+    _fetch_archived_watchlist_items.clear()
+    st.rerun()
+
+def retroactive_scan():
+    """Scans the entire local SQLite database for matches and archives them."""
+    with st.status("🔍 Scanning database for keyword matches...", expanded=True) as status:
+        all_local = db_manager.get_items(limit=10000) # Deep scan
+        matches_found = 0
+        for item in all_local:
+            title_lower = item['title'].lower()
+            for word in monitored_words:
+                if check_keyword_match(word, title_lower):
+                    async_archive_to_firebase(item, word)
+                    matches_found += 1
+                    break
+        status.update(label=f"✅ Scan Complete! Archived {matches_found} new matches.", state="complete")
+        _fetch_archived_watchlist_items.clear()
+
+if col_arc_scan.button("🔎 Scan DB", help="Retroactively scan your history for keywords", use_container_width=True):
+    retroactive_scan()
+
+auto_archive_watchlist = st.sidebar.toggle("Auto-Archive Watchlist", key="auto_archive_watchlist")
+auto_archive_search = st.sidebar.toggle("Auto-Archive Search", key="auto_archive_search")
+
+# Save state when toggles are clicked
+try:
+    with open(os.path.join(os.path.dirname(__file__), 'auto_archive_watchlist.txt'), 'w') as f:
+        f.write(str(auto_archive_watchlist))
+except: pass
+
+try:
+    with open(os.path.join(os.path.dirname(__file__), 'auto_archive_search.txt'), 'w') as f:
+        f.write(str(auto_archive_search))
+except: pass
+
+# Clear All Archive button in sidebar
+if st.sidebar.button("🚨 Clear All Archive", help="Wipe all archived articles from Firebase Firestore", use_container_width=True):
+    st.session_state.confirm_clear_all_archive = True
+
+if st.session_state.get('confirm_clear_all_archive', False):
+    st.sidebar.warning("⚠️ Wipe entire Firestore archive?")
+    col_yes, col_no = st.sidebar.columns(2)
+    if col_yes.button("Yes, Wipe", type="primary", key="btn_wipe_confirm", use_container_width=True):
+        async_clear_all_archive()
+        # Reset local cache & states
+        st.session_state.setdefault('archived_ids', set()).clear()
+        st.session_state.setdefault('deleted_archived_ids', set()).clear()
+        _fetch_archived_watchlist_items.clear()
+        st.session_state.confirm_clear_all_archive = False
+        st.toast("🚨 Firestore archive purge started...", icon="🧹")
+        time.sleep(1)
+        st.rerun()
+    if col_no.button("Cancel", key="btn_wipe_cancel", use_container_width=True):
+        st.session_state.confirm_clear_all_archive = False
+        st.rerun()
+
+
 def format_ts(ts):
     if ts <= 0: return "--:--:--"
     dt = datetime.fromtimestamp(ts, tz=timezone.utc).astimezone(user_tz)
@@ -1391,41 +1701,71 @@ else:
     BG_CONFIG["running"] = False
 BG_CONFIG["sources"] = selected_sources
 
-if enable_auto and auto_refresh_interval > 0 and st.session_state.get('running_state', False):
-    last_fetch = st.session_state.get('last_fetch_time', 0)
-    with STATE_LOCK:
-        global_ts = GLOBAL_STATE.get("last_fetch_time", 0)
-        global_items = GLOBAL_STATE.get("latest_items", [])
-    
-    if global_ts > last_fetch:
-        st.session_state['last_fetch_time'] = global_ts
-        # Sync latest items from background thread to UI session
-        st.session_state['fetched_items'] = global_items
-        st.rerun()
+with STATE_LOCK:
+    BG_CONFIG["auto_archive_watchlist"] = auto_archive_watchlist
+    BG_CONFIG["auto_archive_search"] = auto_archive_search
+    BG_CONFIG["search_query"] = search_query.strip().lower() if search_query else ""
+    BG_CONFIG["monitored_words"] = monitored_words
+    BG_CONFIG["deleted_archived_ids"] = st.session_state.get("deleted_archived_ids", set())
 
-    last_time_str = format_ts(last_fetch)
-    next_time_str = format_ts(last_fetch + auto_refresh_interval * 60) if last_fetch > 0 else "--:--:--"
+# --- Consolidated Refresh Settings & Status ---
+if enable_auto:
     with st.sidebar:
-        components.html(f"""
-        <div style='background:rgba(255,255,255,0.08);border-radius:8px;padding:10px;font-size:12px;font-family:sans-serif;'>
-            <div style='color:#aaa;'>📡 Last Fetched: <b style='color:white'>{last_time_str}</b></div>
-            <div style='color:#aaa;margin-top:4px;'>🔜 Next Refresh: <b style='color:white'>{next_time_str}</b></div>
-            <div id='cd' style='font-weight:bold;font-size:16px;margin-top:4px;color:#00CC44;'>--:--</div>
-        </div>
-        <script>
-        const fetchTs = {int(last_fetch * 1000)};
-        const intervalMs = {auto_refresh_interval * 60 * 1000};
-        function tick() {{
-            const el = document.getElementById('cd');
-            if (!el || fetchTs === 0) return;
-            const remaining = Math.max(0, intervalMs - (Date.now() - fetchTs));
-            const mins = String(Math.floor(remaining / 60000)).padStart(2,'0');
-            const secs = String(Math.floor((remaining % 60000) / 1000)).padStart(2,'0');
-            el.textContent = (remaining <= 30000 ? '⚡ ' : '✅ ') + mins + ':' + secs;
-            if (remaining === 0) setTimeout(() => window.top.location.reload(), 2000);
-        }}
-        setInterval(tick, 1000); tick();
-        </script>""", height=105)
+        st.markdown('<div style="background:rgba(255,255,255,0.05);border-radius:12px;padding:15px;margin-bottom:15px;border:1px solid rgba(255,255,255,0.1);">', unsafe_allow_html=True)
+        
+        # 1. The Slider
+        auto_refresh_interval = st.slider("Interval (Minutes)", min_value=1, max_value=60, key="refresh_interval_slider")
+        
+        # 2. The Status Box (Only if system is running)
+        if st.session_state.get('running_state', False):
+            last_fetch = st.session_state.get('last_fetch_time', 0)
+            with STATE_LOCK:
+                global_ts = GLOBAL_STATE.get("last_fetch_time", 0)
+                global_items = GLOBAL_STATE.get("latest_items", [])
+            
+            if global_ts > last_fetch:
+                st.session_state['last_fetch_time'] = global_ts
+                st.session_state['fetched_items'] = global_items
+                st.rerun()
+
+            last_time_str = format_ts(last_fetch)
+            next_time_str = format_ts(last_fetch + auto_refresh_interval * 60) if last_fetch > 0 else "Pending..."
+            
+            components.html(f"""
+            <div style='background:rgba(255,255,255,0.08);border-radius:8px;padding:10px;font-size:12px;font-family:sans-serif;'>
+                <div style='color:#aaa;'>📡 Last Fetched: <b style='color:white'>{last_time_str}</b></div>
+                <div style='color:#aaa;margin-top:4px;'>🔜 Next Refresh: <b style='color:white'>{next_time_str}</b></div>
+                <div id='cd' style='font-weight:bold;font-size:16px;margin-top:4px;color:#00CC44;'>--:--</div>
+            </div>
+            <script>
+            const fetchTs = {int(last_fetch * 1000)};
+            const serverNow = {int(time.time() * 1000)};
+            const intervalMs = {auto_refresh_interval * 60 * 1000};
+            const clockOffset = Date.now() - serverNow;
+            function tick() {{
+                const el = document.getElementById('cd');
+                if (!el) return;
+                if (fetchTs === 0) {{
+                    el.textContent = '🔄 Initializing...';
+                    return;
+                }}
+                const nowServerTime = Date.now() - clockOffset;
+                const remaining = Math.max(0, intervalMs - (nowServerTime - fetchTs));
+                const mins = String(Math.floor(remaining / 60000)).padStart(2,'0');
+                const secs = String(Math.floor((remaining % 60000) / 1000)).padStart(2,'0');
+                el.textContent = (remaining <= 30000 ? '⚡ ' : '✅ ') + mins + ':' + secs;
+                if (remaining === 0) {{
+                    const lastReload = parseInt(window.top.sessionStorage.getItem('digg_last_reload') || '0');
+                    if (Date.now() - lastReload > 8000) {{
+                        window.top.sessionStorage.setItem('digg_last_reload', Date.now());
+                        window.top.location.reload();
+                    }}
+                }}
+            }}
+            setInterval(tick, 1000); tick();
+            </script>""", height=105)
+        
+        st.markdown('</div>', unsafe_allow_html=True)
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 📰 News Sources")
@@ -1492,6 +1832,17 @@ with st.sidebar.expander("🌐 ต่างประเทศ (International)", 
 st.sidebar.caption(f"📂 Sources selected: {len(selected_sources)} / {len(sources_data)}")
 if search_query:
     st.sidebar.caption(f"🔍 Active Search: '{search_query}'")
+    
+    # Auto-archive search matches if enabled
+    if st.session_state.get('auto_archive_search', False):
+        archived_ids = st.session_state.setdefault('archived_ids', set())
+        all_fetched = st.session_state.get('fetched_items', [])
+        deleted_archived_ids = st.session_state.get('deleted_archived_ids', set())
+        for item in all_fetched:
+            if search_query.lower() in item['title'].lower():
+                if item['id'] not in archived_ids and item['id'] not in deleted_archived_ids:
+                    async_archive_to_firebase(item, f"search:{search_query}")
+                    archived_ids.add(item['id'])
 
 # Detect change in selection to save to file
 if 'prev_selected' not in st.session_state or set(st.session_state.prev_selected) != set(selected_sources):
@@ -1507,7 +1858,34 @@ st.sidebar.markdown("---")
 st.sidebar.markdown("<div style='text-align: center; color: #bbb; font-size: 15px;'>Credits: <b style='color: white;'>Joopiest Udomsaph</b></div>", unsafe_allow_html=True)
 
 # --- Main Feed Logic ---
-if not st.session_state.get('fetched_items'):
+# Navigation Tabs Configuration
+tab_options = ["📊 Digg Stack", "All Feed", "🎯 Watchlist", "Breaking", "Technology", "Education", "Politics", "Finance", "Economy", "Entertainment", "General"]
+active_tab = st.session_state.get('active_tab', "📊 Digg Stack")
+
+
+# 1. Fetch data from SQLite cache
+allowed_names = [SOURCE_MAPPING.get(src, src) for src in selected_sources]
+max_age = st.session_state.get('max_age_days_slider', 7) if st.session_state.get('enable_date_filter_toggle', False) else 9999
+
+# The high-performance SQL-based retrieval
+filtered_items = db_manager.get_items(
+    sources=allowed_names,
+    category=active_tab if active_tab not in ["All Feed", "📊 Digg Stack", "🎯 Watchlist", "☁️ Firebase Archive"] else None,
+    search_query=search_query if search_query else None,
+    max_age_days=max_age,
+    limit=3000
+)
+
+# Sync fetched_items with the database count for Watchlist processing
+st.session_state.fetched_items = db_manager.get_items(sources=allowed_names, limit=1000)
+
+# --- Smart Recovery Logic ---
+# Only trigger a full re-fetch if the ENTIRE local database is empty 
+# and the user is on a main "Live" tab. This prevents loops in the Archive.
+local_total = db_manager.get_count()
+is_main_tab = active_tab in ["All Feed", "📊 Digg Stack"]
+
+if local_total == 0 and is_main_tab:
     if st.session_state.get('running_state', False):
         with st.status("📡 System is running but feed is empty. Attempting to recover data...", expanded=True) as status:
             all_sources_list = [src[0] for src in sources_data]
@@ -1516,71 +1894,130 @@ if not st.session_state.get('fetched_items'):
         st.rerun()
     else:
         st.info("🚀 Feed is empty. Click '▶ START' in the sidebar to load trending news!")
-else:
-    def get_total_score(item):
-        db_id = get_db_id(item['id'])
-        local_vote_boost = st.session_state.user_votes.get(item['id'], 0) * 100
-        return item['base_score'] + global_votes.get(db_id, 0) + local_vote_boost
+        st.stop()
 
-    SOURCE_MAPPING = {
-        "Reuters (World News)": "Reuters", "Associated Press (AP)": "AP News", "The Information (Tech)": "The Information",
-        "Axios (News)": "Axios", "TikTok Trends": "TikTok",
-        "Threads Trends": "Threads", "Instagram Trends": "Instagram", "Reddit (Global Trends)": "Reddit",
-        "Pantip (Thai Trends)": "Pantip", "Google News (Thailand)": "Google News TH", "Google News TH (IT)": "Google News TH (IT)",
-        "Google News (International)": "Google News Int",
-        "BBC (Global News)": "BBC News", "CNN (Global News)": "CNN", "Al Jazeera (Global News)": "Al Jazeera",
-        "Thairath (Thai News)": "Thairath", "Blognone (IT News)": "Blognone", "The Standard (Thai News)": "The Standard",
-        "Krungthep Turakij (Business News)": "Krungthep Turakij", "Spaceth.co (Space News)": "Spaceth.co",
-        "Physics.org (Science News)": "Phys.org", "Space.com (Space News)": "Space.com", "MIT Tech Review (Tech News)": "MIT Tech Review",
-        "Wired Magazine (Tech News)": "Wired", "Physics World (Science News)": "Physics World", "X (Twitter Trends)": "X (Twitter)",
-        "Isranews (Thai News)": "Isranews", "Matichon (Thai News)": "Matichon", "Bloomberg (Business News)": "Bloomberg",
-        "Wall Street Journal (Business News)": "Wall Street Journal", "JS100 (Traffic & News)": "JS100"
-    }
+# If the current tab is empty (but the DB isn't), just show a message instead of looping
+if not filtered_items and active_tab not in ["☁️ Firebase Archive", "🎯 Watchlist"]:
+    st.info(f"No news found in the {active_tab} category matching your filters.")
+    st.stop()
+
+def get_total_score(item):
+    db_id = get_db_id(item['id'])
+    local_vote_boost = st.session_state.user_votes.get(item['id'], 0) * 100
+    return item['base_score'] + global_votes.get(db_id, 0) + local_vote_boost
+
+SOURCE_MAPPING = {
+    "Reuters (World News)": "Reuters", "Associated Press (AP)": "AP News", "The Information (Tech)": "The Information",
+    "Axios (News)": "Axios", "TikTok Trends": "TikTok",
+    "Threads Trends": "Threads", "Instagram Trends": "Instagram", "Reddit (Global Trends)": "Reddit",
+    "Pantip (Thai Trends)": "Pantip", "Google News (Thailand)": "Google News TH", "Google News TH (IT)": "Google News TH (IT)",
+    "Google News (International)": "Google News Int",
+    "BBC (Global News)": "BBC News", "CNN (Global News)": "CNN", "Al Jazeera (Global News)": "Al Jazeera",
+    "Thairath (Thai News)": "Thairath", "Blognone (IT News)": "Blognone", "The Standard (Thai News)": "The Standard",
+    "Krungthep Turakij (Business News)": "Krungthep Turakij", "Spaceth.co (Space News)": "Spaceth.co",
+    "Physics.org (Science News)": "Phys.org", "Space.com (Space News)": "Space.com", "MIT Tech Review (Tech News)": "MIT Tech Review",
+    "Wired Magazine (Tech News)": "Wired", "Physics World (Science News)": "Physics World", "X (Twitter Trends)": "X (Twitter)",
+    "Isranews (Thai News)": "Isranews", "Matichon (Thai News)": "Matichon", "Bloomberg (Business News)": "Bloomberg",
+    "Wall Street Journal (Business News)": "Wall Street Journal", "JS100 (Traffic & News)": "JS100"
+}
+
+sorted_items = sorted(filtered_items, key=get_total_score, reverse=True)
+
+def highlight_text(text, words_to_highlight, search_query=None):
+    if not text: return text
+    highlighted = text
     
-    allowed_names = [SOURCE_MAPPING.get(src, src) for src in selected_sources]
-    
-    # Revert to stable source-based filtering
-    filtered_items = [item for item in st.session_state.fetched_items if item['source'] in allowed_names]
+    # 1. Highlight Monitored Keywords with specific colors
+    for word, color in words_to_highlight.items():
+        if not word: continue
+        # Use a case-insensitive regex that handles Thai and English correctly
+        # For English, we want word boundaries, for Thai, just the substring
+        has_thai = any('\u0E00' <= c <= '\u0E7F' for c in word)
+        if has_thai:
+            pattern = re.compile(re.escape(word), re.I)
+        else:
+            pattern = re.compile(rf'\b{re.escape(word)}\b', re.I)
             
-    # Apply Date Filter
-    if st.session_state.get('enable_date_filter_toggle', False):
-        now = time.time()
-        max_age_seconds = st.session_state.get('max_age_days_slider', 7) * 86400
-        filtered_items = [
-            item for item in filtered_items 
-            if (now - item.get('pub_timestamp', now)) <= max_age_seconds
-        ]
+        highlighted = pattern.sub(f'<span style="background-color: {color}; color: #000; padding: 0 4px; border-radius: 3px; font-weight: 800;">\\g<0></span>', highlighted)
 
+    # 2. Highlight active Search Query (Blue background)
     if search_query:
-        filtered_items = [item for item in filtered_items if search_query.lower() in item['title'].lower()]
+        pattern = re.compile(re.escape(search_query), re.I)
+        highlighted = pattern.sub(f'<span style="background-color: #3B82F6; color: #fff; padding: 0 4px; border-radius: 3px; font-weight: 800;">\\g<0></span>', highlighted)
+        
+    return highlighted
+
+def render_item(item, tab_prefix):
+    total_score = get_total_score(item)
+    item_id = item['id']
+    current_vote = st.session_state.user_votes.get(item_id, 0)
     
-    sorted_items = sorted(filtered_items, key=get_total_score, reverse=True)
+    # DYNAMIC EVALUATION: Check current monitored keywords on-the-fly
+    title_lower = item['title'].lower()
+    is_monitored = False
+    match_color = "#FFD700"
+    for word in monitored_words:
+        if check_keyword_match(word, title_lower):
+            is_monitored = True
+            match_color = kw_colors.get(word, "#FFD700")
+            break
+            
+    category = item.get('category', 'General')
+    
+    col_vote, col_content = st.columns([2.5, 7.5])
+    with col_vote:
+        # Selection Checkbox for Multi-Select
+        is_selected = item_id in st.session_state.selected_ids
+        if st.checkbox(" ", key=f"sel_{item_id}_{tab_prefix}", value=is_selected, label_visibility="collapsed", on_change=toggle_selection, args=(item_id,)):
+            pass
 
-    def render_item(item, tab_prefix):
-        total_score = get_total_score(item)
-        item_id = item['id']
-        current_vote = st.session_state.user_votes.get(item_id, 0)
+        if st.button("▲", key=f"up_{item_id}_{tab_prefix}"):
+            new_vote = 1 if current_vote <= 0 else 0
+            update_global_vote(item_id, current_vote, new_vote)
+            st.session_state.user_votes[item_id] = new_vote
+            st.rerun()
         
-        # Metadata pre-calculated during fetch
-        is_monitored = item.get('is_monitored', False)
-        match_color = item.get('match_color', "#FFD700")
-        category = item.get('category', 'General')
+        st.markdown(f"<div class='score-box' style='color: {'#ff4500' if total_score > item['base_score'] else '#888'};'>{total_score}</div>", unsafe_allow_html=True)
         
-        col_vote, col_content = st.columns([2.5, 7.5])
-        with col_vote:
-            if st.button("▲", key=f"up_{item_id}_{tab_prefix}"):
-                new_vote = 1 if current_vote <= 0 else 0
-                update_global_vote(item_id, current_vote, new_vote)
-                st.session_state.user_votes[item_id] = new_vote
-                st.rerun()
-            st.markdown(f"<div class='score-box' style='color: {'#ff4500' if total_score > item['base_score'] else '#888'};'>{total_score}</div>", unsafe_allow_html=True)
-            if st.button("▼", key=f"down_{item_id}_{tab_prefix}"):
-                new_vote = -1 if current_vote >= 0 else 0
-                update_global_vote(item_id, current_vote, new_vote)
-                st.session_state.user_votes[item_id] = new_vote
-                st.rerun()
+        if st.button("▼", key=f"down_{item_id}_{tab_prefix}"):
+            new_vote = -1 if current_vote >= 0 else 0
+            update_global_vote(item_id, current_vote, new_vote)
+            st.session_state.user_votes[item_id] = new_vote
+            st.rerun()
+                
+        # --- Individual Article Archiver / Deleter ---
+        archived_ids = st.session_state.setdefault('archived_ids', set())
+        is_archived = item_id in archived_ids
+        
+        if tab_prefix.startswith("firebase_arc_"):
+            if st.session_state.get('confirm_delete_item') == item_id:
+                if st.button("❓", key=f"del_conf_{item_id}_{tab_prefix}", help="Confirm Delete?"):
+                    async_delete_from_firebase(item_id)
+                    if item_id in archived_ids:
+                        archived_ids.remove(item_id)
+                    st.session_state.setdefault('deleted_archived_ids', set()).add(item_id)
+                    st.session_state.confirm_delete_item = None
+                    _fetch_archived_watchlist_items.clear()
+                    st.toast(f"🗑️ Deleted: '{item['title'][:30]}...'", icon="✅")
+                    st.rerun()
+                if st.button("❌", key=f"del_canc_{item_id}_{tab_prefix}", help="Cancel"):
+                    st.session_state.confirm_delete_item = None
+                    st.rerun()
+            else:
+                if st.button("🗑️", key=f"del_{item_id}_{tab_prefix}", help="Delete from Firebase"):
+                    st.session_state.confirm_delete_item = item_id
+                    st.rerun()
+        else:
+            if is_archived:
+                st.button("✅", key=f"arc_{item_id}_{tab_prefix}", disabled=True, help="Archived in Firebase")
+            else:
+                if st.button("📥", key=f"arc_{item_id}_{tab_prefix}", help="Archive to Firebase"):
+                    async_archive_to_firebase(item, "manual")
+                    archived_ids.add(item_id)
+                    st.toast(f"📥 Saved to Firebase: '{item['title'][:30]}...'", icon="✅")
+                    st.rerun()
 
-        with col_content:
+    with col_content:
             source_colors = {
                 "Reuters": "#FF8000", "AP News": "#D2232A", "The Information": "#000000", "Axios": "#005994",
                 "TikTok": "#EE1D52", "Threads": "#000000", "Instagram": "#C13584", "Reddit": "#FF4500", "Pantip": "#3f3652",
@@ -1599,98 +2036,202 @@ else:
             rel_time = format_relative_time(item.get('pub_timestamp', time.time()))
             time_badge = f'<span class="time-badge" style="background-color: rgba(255,255,255,0.08); color: #ccc; padding: 2px 8px; border-radius: 4px; font-size: 11px; margin-left: 5px;">⏳ {rel_time}</span>'
             
-            st.markdown(f'<div class="{card_class}" style="{card_style}"><div style="flex: 1;"><span class="source-badge" style="background-color: {bg_color};">{item["source"]}</span> <span class="category-badge">{category}</span> {time_badge} {match_badge}<br><a class="news-title" href="{item["url"]}" target="_blank" style="color: {match_color if is_monitored else "white"} !important; font-weight: {"900" if is_monitored else "normal"};">{item["title"]}</a></div></div>', unsafe_allow_html=True)
+            # Apply dynamic highlighting to the title
+            highlighted_title = highlight_text(item["title"], kw_colors, search_query)
+            
+            st.markdown(f'<div class="{card_class}" style="{card_style}"><div style="flex: 1;"><span class="source-badge" style="background-color: {bg_color};">{item["source"]}</span> <span class="category-badge">{category}</span> {time_badge} {match_badge}<br><a class="news-title" href="{item["url"]}" target="_blank" style="color: {match_color if is_monitored else "white"} !important; font-weight: {"900" if is_monitored else "normal"};">{highlighted_title}</a></div></div>', unsafe_allow_html=True)
 
-    tab_options = ["📊 Digg Stack", "All Feed", "🎯 Watchlist", "Breaking", "Technology", "Education", "Politics", "Finance", "Economy", "Entertainment", "General"]
-    active_tab = st.session_state.get('active_tab', "📊 Digg Stack")
+with st.expander("☁️ Explore Topic Word Cloud"):
+    all_titles = " ".join([item['title'] for item in filtered_items])
+    word_counts = get_word_cloud_data(all_titles)
     
-    with st.expander("☁️ Explore Topic Word Cloud"):
-        all_titles = " ".join([item['title'] for item in filtered_items])
-        word_counts = get_word_cloud_data(all_titles)
-        
-        st.write("✨ Trending Keyword Star Field:")
-        rows = [word_counts[i:i+5] for i in range(0, len(word_counts), 5)]
-        for r_idx, row in enumerate(rows):
-            cols = st.columns(5)
-            for i, (w, c) in enumerate(row):
-                cols[i].button(f"{w} ({c})", key=f"wc_{r_idx}_{i}", on_click=select_word_callback, args=(w,), use_container_width=True)
+    st.write("✨ Trending Keyword Star Field:")
+    rows = [word_counts[i:i+5] for i in range(0, len(word_counts), 5)]
+    for r_idx, row in enumerate(rows):
+        cols = st.columns(5)
+        for i, (w, c) in enumerate(row):
+            cols[i].button(f"{w} ({c})", key=f"wc_{r_idx}_{i}", on_click=select_word_callback, args=(w,), use_container_width=True)
 
-    # Wrap navigation in a sticky div
-    st.markdown('<div class="sticky-nav">', unsafe_allow_html=True)
-    tab_cols = st.columns(len(tab_options))
-    for idx, opt in enumerate(tab_options):
-        if tab_cols[idx].button(opt, key=f"nav_{idx}", type="primary" if active_tab == opt else "secondary", use_container_width=True):
-            st.session_state.active_tab = opt; st.rerun()
+# Wrap navigation in a sticky div
+st.markdown('<div class="sticky-nav">', unsafe_allow_html=True)
+tab_cols = st.columns(len(tab_options))
+for idx, opt in enumerate(tab_options):
+    if tab_cols[idx].button(opt, key=f"nav_{idx}", type="primary" if active_tab == opt else "secondary", use_container_width=True):
+        st.session_state.active_tab = opt; st.rerun()
+st.markdown('</div>', unsafe_allow_html=True)
+
+# --- Multi-Select & Bulk Archive Bar ---
+selected_count = len(st.session_state.selected_ids)
+is_searching = bool(search_query and sorted_items)
+
+if selected_count > 0 or is_searching:
+    # Get items for current selection
+    selected_items = [item for item in sorted_items if item['id'] in st.session_state.selected_ids]
+    archived_ids = st.session_state.get('archived_ids', set())
+    
+    # Header bar
+    st.markdown('<div style="background:rgba(59, 130, 246, 0.15); border-radius:12px; padding:15px; margin-bottom:20px; border:1px solid rgba(59, 130, 246, 0.3);">', unsafe_allow_html=True)
+    
+    col_info, col_actions = st.columns([0.6, 0.4])
+    
+    with col_info:
+        if selected_count > 0:
+            st.markdown(f"📦 **{selected_count} items selected** for manual archiving.")
+        elif is_searching:
+            unarchived_search = [item for item in sorted_items if item['id'] not in archived_ids]
+            st.markdown(f"🔍 **{len(sorted_items)} search matches** for '{search_query}'.")
+            
+    with col_actions:
+        if active_tab == "☁️ Firebase Archive" and st.session_state.get('confirm_delete_bulk', False):
+            st.warning("⚠️ Permanently delete these items?")
+            conf_cols = st.columns(2)
+            if conf_cols[0].button("Yes, Delete", type="primary", use_container_width=True):
+                bulk_delete_selected([{"id": i} for i in st.session_state.selected_ids])
+            if conf_cols[1].button("Cancel", use_container_width=True):
+                st.session_state.confirm_delete_bulk = False
+                st.rerun()
+        else:
+            btn_cols = st.columns(3)
+            
+            # Action 1: Select/Deselect all on CURRENT page
+            if active_tab == "All Feed":
+                current_page_items = sorted_items
+            elif active_tab == "🎯 Watchlist":
+                all_f = st.session_state.get('fetched_items', [])
+                w_items = [item for item in all_f if item.get('source') in allowed_names]
+                a_items = [item for item in get_archived_watchlist_items() if item.get('source') in allowed_names]
+                s_ids = set()
+                c_items = []
+                for item in w_items + a_items:
+                    if item['id'] not in s_ids:
+                        title_lower = item['title'].lower()
+                        for word in monitored_words:
+                            if check_keyword_match(word, title_lower):
+                                c_items.append(item)
+                                s_ids.add(item['id'])
+                                break
+                if search_query:
+                    c_items = [item for item in c_items if search_query.lower() in item['title'].lower()]
+                current_page_items = c_items
+            elif active_tab == "☁️ Firebase Archive":
+                current_page_items = get_archived_watchlist_items()
+            elif active_tab == "📊 Digg Stack":
+                current_page_items = sorted_items
+            else:
+                current_page_items = [i for i in sorted_items if i['category'] == active_tab]
+                
+            current_page_ids = {item['id'] for item in current_page_items}
+            all_on_page_selected = current_page_ids.issubset(st.session_state.selected_ids)
+            
+            if btn_cols[0].button("✅ All", help="Select all on this page", use_container_width=True):
+                select_all_on_page(current_page_items, active_tab)
+                st.rerun()
+                
+            if btn_cols[1].button("🧹 Clear", help="Clear selection", use_container_width=True):
+                clear_selection()
+                st.rerun()
+                
+            # Action 2: Perform the Archive / Delete
+            target_items = selected_items if selected_count > 0 else (unarchived_search if is_searching else [])
+            if active_tab == "☁️ Firebase Archive":
+                if btn_cols[2].button("🗑️ Delete", help="Delete from Firebase", type="primary", use_container_width=True):
+                    st.session_state.confirm_delete_bulk = True
+                    st.rerun()
+            else:
+                if btn_cols[2].button("📥 Archive", help="Archive to Firebase", type="primary", use_container_width=True):
+                    bulk_archive_selected(target_items)
+
     st.markdown('</div>', unsafe_allow_html=True)
 
-    if active_tab == "All Feed":
-        cols = st.columns(3)
-        for idx, item in enumerate(sorted_items):
-            with cols[idx % 3]: render_item(item, f"all_{idx}")
-    elif active_tab == "🎯 Watchlist":
-        # Use ALL fetched items for Watchlist, ignoring source filters but respecting search and keywords
-        all_fetched = st.session_state.get('fetched_items', [])
-        watch_items = [item for item in all_fetched if item.get('is_monitored', False)]
-        
-        # Merge permanently archived watchlist items from Firestore
-        archived_items = get_archived_watchlist_items()
-        
-        # Deduplicate using article ID and filter by current monitored keywords and search query
-        seen_ids = set()
-        combined_items = []
-        for item in watch_items + archived_items:
-            if item['id'] not in seen_ids:
-                title_lower = item['title'].lower()
-                matches_current = False
-                for word in monitored_words:
-                    if check_keyword_match(word, title_lower):
-                        matches_current = True
-                        item['is_monitored'] = True
-                        item['match_color'] = kw_colors.get(word, "#FFD700")
-                        break
-                
-                # Only include in Watchlist if it matches a currently monitored word
-                if matches_current:
-                    combined_items.append(item)
-                    seen_ids.add(item['id'])
-        
-        # Apply Search Query filter to Watchlist tab
-        if search_query:
-            combined_items = [item for item in combined_items if search_query.lower() in item['title'].lower()]
+if active_tab == "All Feed":
+    cols = st.columns(3)
+    for idx, item in enumerate(sorted_items):
+        with cols[idx % 3]: render_item(item, f"all_{idx}")
+elif active_tab == "🎯 Watchlist":
+    # Respect global source filters, search queries, and keywords in Watchlist
+    all_fetched = st.session_state.get('fetched_items', [])
+    watch_items = [item for item in all_fetched if item.get('source') in allowed_names]
+    
+    # Merge permanently archived watchlist items from Firestore, respecting active source selection
+    archived_items = [item for item in get_archived_watchlist_items() if item.get('source') in allowed_names]
+    
+    # Deduplicate using article ID and filter by current monitored keywords and search query
+    seen_ids = set()
+    combined_items = []
+    for item in watch_items + archived_items:
+        if item['id'] not in seen_ids:
+            title_lower = item['title'].lower()
+            matches_current = False
+            for word in monitored_words:
+                if check_keyword_match(word, title_lower):
+                    matches_current = True
+                    item['is_monitored'] = True
+                    item['match_color'] = kw_colors.get(word, "#FFD700")
+                    break
             
-        watch_items = sorted(combined_items, key=get_total_score, reverse=True)
+            # Only include in Watchlist if it matches a currently monitored word
+            if matches_current:
+                combined_items.append(item)
+                seen_ids.add(item['id'])
+    
+    # Apply Search Query filter to Watchlist tab
+    if search_query:
+        combined_items = [item for item in combined_items if search_query.lower() in item['title'].lower()]
         
-        if not watch_items: st.info("No items match your watchlist keywords.")
-        else:
-            cols = st.columns(3)
-            for idx, item in enumerate(watch_items):
-                with cols[idx % 3]: render_item(item, f"watch_{idx}")
-    elif active_tab == "📊 Digg Stack":
-        # Minimized serialization for Digg Stack
-        stack_data = []
-        for item in sorted_items:
-            # Dynamically format raw epoch timestamp based on LATEST selected timezone
-            raw_ts = item.get('fetch_timestamp')
-            if raw_ts:
-                formatted_time = format_ts(raw_ts)
-            else:
-                formatted_time = item.get('fetch_time', '--:--:--')
-                
-            stack_data.append({
-                "id": item['id'], 
-                "title": item['title'], 
-                "category": item.get('category', 'General'), 
-                "score": get_total_score(item), 
-                "url": item['url'], 
-                "source": item['source'],
-                "is_monitored": item.get('is_monitored', False),
-                "match_color": item.get('match_color', "#FFD700"),
-                "fetch_time": formatted_time,
-                "pub_time": format_relative_time(item.get('pub_timestamp', time.time()))
-            })
-        js_data = json.dumps(stack_data)
+    watch_items = sorted(combined_items, key=get_total_score, reverse=True)
+    
+    if not watch_items: st.info("No items match your watchlist keywords.")
+    else:
+        cols = st.columns(3)
+        for idx, item in enumerate(watch_items):
+            with cols[idx % 3]: render_item(item, f"watch_{idx}")
+elif active_tab == "☁️ Firebase Archive":
+    # Fetch permanent archives from Firestore
+    archived_items = get_archived_watchlist_items()
+    
+    if not archived_items:
+        st.info("☁️ Firebase Archive is empty. Any news matching your monitored keywords or search queries will be saved here permanently.")
+    else:
+        st.success(f"☁️ Showing {len(archived_items)} permanently archived articles from Firebase Firestore.")
+        cols = st.columns(3)
+        for idx, item in enumerate(archived_items):
+            with cols[idx % 3]: render_item(item, f"firebase_arc_{idx}")
+elif active_tab == "📊 Digg Stack":
+    # Minimized serialization for Digg Stack
+    stack_data = []
+    for item in sorted_items:
+        # DYNAMIC EVALUATION for 3D Stack
+        title_lower = item['title'].lower()
+        is_monitored = False
+        match_color = "#FFD700"
+        for word in monitored_words:
+            if check_keyword_match(word, title_lower):
+                is_monitored = True
+                match_color = kw_colors.get(word, "#FFD700")
+                break
 
-        html_code = """
+        # Dynamically format raw epoch timestamp based on LATEST selected timezone
+        raw_ts = item.get('fetch_timestamp')
+        if raw_ts:
+            formatted_time = format_ts(raw_ts)
+        else:
+            formatted_time = item.get('fetch_time', '--:--:--')
+            
+        stack_data.append({
+            "id": item['id'], 
+            "title": item['title'], 
+            "category": item.get('category', 'General'), 
+            "score": get_total_score(item), 
+            "url": item['url'], 
+            "source": item['source'],
+            "is_monitored": is_monitored,
+            "match_color": match_color,
+            "fetch_time": formatted_time,
+            "pub_time": format_relative_time(item.get('pub_timestamp', time.time()))
+        })
+    js_data = json.dumps(stack_data)
+
+    html_code = """
         <!-- FORCE RELOAD V3 -->
         <!DOCTYPE html>
         <html>
@@ -2436,17 +2977,17 @@ else:
             </script>
         </body>
         </html>
-        """
-        # Inject data and state
-        processed_html = html_code.replace('let rawData = [];', f'let rawData = {js_data};')
-        processed_html = processed_html.replace('let isSystemRunning = false;', f'let isSystemRunning = {"true" if st.session_state.get("running_state", False) else "false"};')
-        components.html(processed_html, height=750)
+    """
+    # Inject data and state
+    processed_html = html_code.replace('let rawData = [];', f'let rawData = {js_data};')
+    processed_html = processed_html.replace('let isSystemRunning = false;', f'let isSystemRunning = {"true" if st.session_state.get("running_state", False) else "false"};')
+    components.html(processed_html, height=750)
+else:
+    cat_items = [item for item in sorted_items if item['category'] == active_tab]
+    if not cat_items:
+        st.info(f"No news found in the {active_tab} category matching your filters.")
     else:
-        cat_items = [item for item in sorted_items if item['category'] == active_tab]
-        if not cat_items:
-            st.info(f"No news found in the {active_tab} category matching your filters.")
-        else:
-            cols = st.columns(3)
-            for idx, item in enumerate(cat_items):
-                with cols[idx % 3]: render_item(item, f"cat_{idx}")
+        cols = st.columns(3)
+        for idx, item in enumerate(cat_items):
+            with cols[idx % 3]: render_item(item, f"cat_{idx}")
 
