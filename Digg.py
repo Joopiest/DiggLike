@@ -1,7 +1,11 @@
 import sys
 import os
-# Ensure directory of Digg.py is in sys.path for Streamlit Cloud
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+# Ensure directory of Digg.py and possible subdirectories are in sys.path
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(current_dir)
+sys.path.append(os.path.join(current_dir, "Digg Like"))
+sys.path.append(os.path.join(current_dir, "digglike"))
+
 
 import streamlit as st
 from collections import Counter
@@ -1745,12 +1749,20 @@ if enable_auto:
             const fetchTs = {int(last_fetch * 1000)};
             const serverNow = {int(time.time() * 1000)};
             const intervalMs = {auto_refresh_interval * 60 * 1000};
+            const isSystemRunning = {"true" if st.session_state.get('running_state', False) else "false"};
             const clockOffset = Date.now() - serverNow;
             function tick() {{
                 const el = document.getElementById('cd');
                 if (!el) return;
                 if (fetchTs === 0) {{
                     el.textContent = '🔄 Initializing...';
+                    if (isSystemRunning) {{
+                        const lastReload = parseInt(window.top.sessionStorage.getItem('digg_last_reload') || '0');
+                        if (Date.now() - lastReload > 8000) {{
+                            window.top.sessionStorage.setItem('digg_last_reload', Date.now());
+                            window.top.location.reload();
+                        }}
+                    }}
                     return;
                 }}
                 const nowServerTime = Date.now() - clockOffset;
