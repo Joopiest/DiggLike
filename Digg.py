@@ -1,3 +1,8 @@
+import sys
+import os
+# Ensure directory of Digg.py is in sys.path for Streamlit Cloud
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
 import streamlit as st
 from collections import Counter
 import requests
@@ -8,7 +13,6 @@ import json
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import streamlit.components.v1 as components
-import os
 import re
 import calendar
 from datetime import datetime, timezone, timedelta
