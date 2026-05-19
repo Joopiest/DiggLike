@@ -57,6 +57,14 @@ class DatabaseManager:
             except sqlite3.OperationalError:
                 print("FTS5 not supported, skipping virtual table.")
 
+            # Settings/preferences table for persistence
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS app_settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT
+                )
+            ''')
+
             conn.commit()
             conn.close()
 
@@ -139,6 +147,31 @@ class DatabaseManager:
             count = cursor.fetchone()[0]
             conn.close()
             return count
+
+    def get_setting(self, key, default=None):
+        with self.lock:
+            try:
+                conn = self._get_connection()
+                cursor = conn.cursor()
+                cursor.execute("SELECT value FROM app_settings WHERE key = ?", (key,))
+                row = cursor.fetchone()
+                conn.close()
+                if row:
+                    return row[0]
+            except sqlite3.OperationalError:
+                pass
+            return default
+
+    def set_setting(self, key, value):
+        with self.lock:
+            try:
+                conn = self._get_connection()
+                cursor = conn.cursor()
+                cursor.execute("INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)", (key, str(value)))
+                conn.commit()
+                conn.close()
+            except sqlite3.OperationalError:
+                pass
 
 # Singleton instance
 db_manager = DatabaseManager()
