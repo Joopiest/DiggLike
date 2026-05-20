@@ -26,15 +26,15 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 
 # Global ThreadPoolExecutor for asynchronous Firebase operations (archiving/deleting/clearing)
-# Using daemon threads to prevent blocking application shutdown
-def _init_daemon_thread():
-    threading.current_thread().daemon = True
+# Using st.cache_resource to prevent resource leaks and ensure thread pool stability
+@st.cache_resource
+def get_firebase_executor():
+    return ThreadPoolExecutor(
+        max_workers=5,
+        thread_name_prefix="firebase_bg"
+    )
 
-FIREBASE_EXECUTOR = ThreadPoolExecutor(
-    max_workers=5,
-    thread_name_prefix="firebase_bg",
-    initializer=_init_daemon_thread
-)
+FIREBASE_EXECUTOR = get_firebase_executor()
 
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import streamlit.components.v1 as components
