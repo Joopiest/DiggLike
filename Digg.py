@@ -2122,13 +2122,45 @@ for idx, opt in enumerate(tab_options):
         st.session_state.active_tab = opt; st.rerun()
 st.markdown('</div>', unsafe_allow_html=True)
 
+# --- Pre-calculate items shown on the active tab for consistency ---
+if active_tab == "All Feed":
+    current_page_items = sorted_items
+elif active_tab == "🎯 Watchlist":
+    all_fetched = st.session_state.get('fetched_items', [])
+    watch_items = [item for item in all_fetched if item.get('source') in allowed_names]
+    archived_items = [item for item in get_archived_watchlist_items() if item.get('source') in allowed_names]
+    seen_ids = set()
+    combined_items = []
+    for item in watch_items + archived_items:
+        if item['id'] not in seen_ids:
+            title_lower = item['title'].lower()
+            matches_current = False
+            for word in monitored_words:
+                if check_keyword_match(word, title_lower):
+                    matches_current = True
+                    item['is_monitored'] = True
+                    item['match_color'] = kw_colors.get(word, "#FFD700")
+                    break
+            if matches_current:
+                combined_items.append(item)
+                seen_ids.add(item['id'])
+    if search_query:
+        combined_items = [item for item in combined_items if search_query.lower() in item['title'].lower()]
+    current_page_items = sorted(combined_items, key=get_total_score, reverse=True)
+elif active_tab == "☁️ Firebase Archive":
+    current_page_items = get_archived_watchlist_items()
+elif active_tab == "📊 Digg Stack":
+    current_page_items = sorted_items
+else:
+    current_page_items = [item for item in sorted_items if item.get('category') == active_tab]
+
 # --- Multi-Select & Bulk Archive Bar ---
 selected_count = len(st.session_state.selected_ids)
 is_searching = bool(search_query and sorted_items)
 
 if selected_count > 0 or is_searching:
-    # Get items for current selection
-    selected_items = [item for item in sorted_items if item['id'] in st.session_state.selected_ids]
+    # Get items for current selection from current page items
+    selected_items = [item for item in current_page_items if item['id'] in st.session_state.selected_ids]
     archived_ids = st.session_state.get('archived_ids', set())
     
     # Header bar
@@ -2140,8 +2172,8 @@ if selected_count > 0 or is_searching:
         if selected_count > 0:
             st.markdown(f"📦 **{selected_count} items selected** for manual archiving.")
         elif is_searching:
-            unarchived_search = [item for item in sorted_items if item['id'] not in archived_ids]
-            st.markdown(f"🔍 **{len(sorted_items)} search matches** for '{search_query}'.")
+            unarchived_search = [item for item in current_page_items if item['id'] not in archived_ids]
+            st.markdown(f"🔍 **{len(current_page_items)} search matches** for '{search_query}'.")
             
     with col_actions:
         if active_tab == "☁️ Firebase Archive" and st.session_state.get('confirm_delete_bulk', False):
@@ -2156,32 +2188,6 @@ if selected_count > 0 or is_searching:
             btn_cols = st.columns(3)
             
             # Action 1: Select/Deselect all on CURRENT page
-            if active_tab == "All Feed":
-                current_page_items = sorted_items
-            elif active_tab == "🎯 Watchlist":
-                all_f = st.session_state.get('fetched_items', [])
-                w_items = [item for item in all_f if item.get('source') in allowed_names]
-                a_items = [item for item in get_archived_watchlist_items() if item.get('source') in allowed_names]
-                s_ids = set()
-                c_items = []
-                for item in w_items + a_items:
-                    if item['id'] not in s_ids:
-                        title_lower = item['title'].lower()
-                        for word in monitored_words:
-                            if check_keyword_match(word, title_lower):
-                                c_items.append(item)
-                                s_ids.add(item['id'])
-                                break
-                if search_query:
-                    c_items = [item for item in c_items if search_query.lower() in item['title'].lower()]
-                current_page_items = c_items
-            elif active_tab == "☁️ Firebase Archive":
-                current_page_items = get_archived_watchlist_items()
-            elif active_tab == "📊 Digg Stack":
-                current_page_items = sorted_items
-            else:
-                current_page_items = [i for i in sorted_items if i['category'] == active_tab]
-                
             current_page_ids = {item['id'] for item in current_page_items}
             all_on_page_selected = current_page_ids.issubset(st.session_state.selected_ids)
             
@@ -2207,56 +2213,21 @@ if selected_count > 0 or is_searching:
 
 if active_tab == "All Feed":
     cols = st.columns(3)
-    for idx, item in enumerate(sorted_items):
+    for idx, item in enumerate(current_page_items):
         with cols[idx % 3]: render_item(item, f"all_{idx}")
 elif active_tab == "🎯 Watchlist":
-    # Respect global source filters, search queries, and keywords in Watchlist
-    all_fetched = st.session_state.get('fetched_items', [])
-    watch_items = [item for item in all_fetched if item.get('source') in allowed_names]
-    
-    # Merge permanently archived watchlist items from Firestore, respecting active source selection
-    archived_items = [item for item in get_archived_watchlist_items() if item.get('source') in allowed_names]
-    
-    # Deduplicate using article ID and filter by current monitored keywords and search query
-    seen_ids = set()
-    combined_items = []
-    for item in watch_items + archived_items:
-        if item['id'] not in seen_ids:
-            title_lower = item['title'].lower()
-            matches_current = False
-            for word in monitored_words:
-                if check_keyword_match(word, title_lower):
-                    matches_current = True
-                    item['is_monitored'] = True
-                    item['match_color'] = kw_colors.get(word, "#FFD700")
-                    break
-            
-            # Only include in Watchlist if it matches a currently monitored word
-            if matches_current:
-                combined_items.append(item)
-                seen_ids.add(item['id'])
-    
-    # Apply Search Query filter to Watchlist tab
-    if search_query:
-        combined_items = [item for item in combined_items if search_query.lower() in item['title'].lower()]
-        
-    watch_items = sorted(combined_items, key=get_total_score, reverse=True)
-    
-    if not watch_items: st.info("No items match your watchlist keywords.")
+    if not current_page_items: st.info("No items match your watchlist keywords.")
     else:
         cols = st.columns(3)
-        for idx, item in enumerate(watch_items):
+        for idx, item in enumerate(current_page_items):
             with cols[idx % 3]: render_item(item, f"watch_{idx}")
 elif active_tab == "☁️ Firebase Archive":
-    # Fetch permanent archives from Firestore
-    archived_items = get_archived_watchlist_items()
-    
-    if not archived_items:
+    if not current_page_items:
         st.info("☁️ Firebase Archive is empty. Any news matching your monitored keywords or search queries will be saved here permanently.")
     else:
-        st.success(f"☁️ Showing {len(archived_items)} permanently archived articles from Firebase Firestore.")
+        st.success(f"☁️ Showing {len(current_page_items)} permanently archived articles from Firebase Firestore.")
         cols = st.columns(3)
-        for idx, item in enumerate(archived_items):
+        for idx, item in enumerate(current_page_items):
             with cols[idx % 3]: render_item(item, f"firebase_arc_{idx}")
 elif active_tab == "📊 Digg Stack":
     # Minimized serialization for Digg Stack
@@ -3045,11 +3016,10 @@ elif active_tab == "📊 Digg Stack":
     processed_html = processed_html.replace('let isSystemRunning = false;', f'let isSystemRunning = {"true" if st.session_state.get("running_state", False) else "false"};')
     components.html(processed_html, height=750)
 else:
-    cat_items = [item for item in sorted_items if item['category'] == active_tab]
-    if not cat_items:
+    if not current_page_items:
         st.info(f"No news found in the {active_tab} category matching your filters.")
     else:
         cols = st.columns(3)
-        for idx, item in enumerate(cat_items):
+        for idx, item in enumerate(current_page_items):
             with cols[idx % 3]: render_item(item, f"cat_{idx}")
 
